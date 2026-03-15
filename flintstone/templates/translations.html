@@ -1,5 +1,32 @@
 {% extends "base.html" %}
 {% block title %}Translate - {{ project.name }} - Flintstone{% endblock %}
+{% block extra_head %}
+<style>
+    .tm-dropdown {
+        position: absolute;
+        z-index: 100;
+        background: var(--pico-background-color);
+        border: 1px solid var(--pico-primary);
+        border-radius: 0.25rem;
+        max-width: 400px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        font-size: 0.85rem;
+    }
+    .tm-dropdown div {
+        padding: 0.35rem 0.6rem;
+        cursor: pointer;
+        border-bottom: 1px solid var(--pico-muted-border-color);
+    }
+    .tm-dropdown div:last-child { border-bottom: none; }
+    .tm-dropdown div:hover { background: var(--pico-primary-focus); }
+    .tm-match-type {
+        font-size: 0.7rem;
+        color: var(--pico-muted-color);
+        margin-left: 0.5rem;
+    }
+    .tm-source { color: var(--pico-muted-color); font-size: 0.75rem; }
+</style>
+{% endblock %}
 {% block content %}
 <hgroup>
     <h2>{{ project.name }} — Translation Editor</h2>
@@ -47,14 +74,17 @@
             <tr>
                 <td class="key-col" title="{{ row.key.description or '' }}">{{ row.key.key }}</td>
                 {% for lang in languages %}
-                <td>
+                <td style="position:relative;">
                     <input type="text"
                            value="{{ row.translations.get(lang.code, {}).get('value', '') }}"
                            data-key-id="{{ row.key.id }}"
                            data-lang-id="{{ lang.id }}"
                            data-lang-code="{{ lang.code }}"
                            onchange="saveTranslation(this)"
-                           placeholder="Enter {{ lang.code }} translation">
+                           onfocus="fetchTMSuggestions(this)"
+                           onblur="hideTMDropdown(this)"
+                           placeholder="Enter {{ lang.code }} translation"
+                           autocomplete="off">
                 </td>
                 {% endfor %}
                 <td>
@@ -108,6 +138,74 @@ async function deleteKey(keyId) {
     if (!confirm('Delete this key and all its translations?')) return;
     await fetch(`/api/keys/${keyId}`, { method: 'DELETE' });
     location.reload();
+}
+
+/* Translation Memory suggestions */
+let tmTimeout = null;
+let activeDropdown = null;
+
+async function fetchTMSuggestions(input) {
+    // Find the source text: look for the first language column with a value in this row
+    const row = input.closest('tr');
+    const allInputs = row.querySelectorAll('input[data-lang-code]');
+    const targetLang = input.dataset.langCode;
+    let sourceText = '';
+    let sourceLang = '';
+
+    for (const inp of allInputs) {
+        if (inp.dataset.langCode !== targetLang && inp.value.trim()) {
+            sourceText = inp.value.trim();
+            sourceLang = inp.dataset.langCode;
+            break;
+        }
+    }
+
+    if (!sourceText || !sourceLang) return;
+
+    // Debounce
+    clearTimeout(tmTimeout);
+    tmTimeout = setTimeout(async () => {
+        const params = new URLSearchParams({
+            source: sourceText,
+            source_lang: sourceLang,
+            target_lang: targetLang,
+            limit: '5'
+        });
+        const res = await fetch(`/api/memory/suggest?${params}`);
+        if (!res.ok) return;
+        const suggestions = await res.json();
+        if (suggestions.length === 0) return;
+
+        showTMDropdown(input, suggestions);
+    }, 300);
+}
+
+function showTMDropdown(input, suggestions) {
+    hideTMDropdown();
+    const dropdown = document.createElement('div');
+    dropdown.className = 'tm-dropdown';
+
+    for (const s of suggestions) {
+        const item = document.createElement('div');
+        item.innerHTML = `${s.target_text} <span class="tm-match-type">${s.match_type}</span><br><span class="tm-source">${s.source_text}</span>`;
+        item.onmousedown = (e) => {
+            e.preventDefault();
+            input.value = s.target_text;
+            input.dispatchEvent(new Event('change'));
+            hideTMDropdown();
+        };
+        dropdown.appendChild(item);
+    }
+
+    input.parentElement.appendChild(dropdown);
+    activeDropdown = dropdown;
+}
+
+function hideTMDropdown() {
+    if (activeDropdown) {
+        activeDropdown.remove();
+        activeDropdown = null;
+    }
 }
 </script>
 {% endblock %}

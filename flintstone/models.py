@@ -66,3 +66,15 @@ class Translation(Base):
 
     translation_key: Mapped["TranslationKey"] = relationship(back_populates="translations")
     language: Mapped["Language"] = relationship(back_populates="translations")
+
+
+class TranslationMemory(Base):
+    __tablename__ = "translation_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_lang: Mapped[str] = mapped_column(String(10), nullable=False)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    target_lang: Mapped[str] = mapped_column(String(10), nullable=False)
+    target_text: Mapped[str] = mapped_column(Text, nullable=False)
+    project_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

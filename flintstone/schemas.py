@@ -107,3 +107,23 @@ class ProjectStats(BaseModel):
     project_name: str
     total_keys: int
     languages: list[LanguageStats]
+
+
+# --- Translation Memory ---
+
+class TMEntry(BaseModel):
+    id: int
+    source_lang: str
+    source_text: str
+    target_lang: str
+    target_text: str
+    project_id: int | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class TMSuggestion(BaseModel):
+    source_text: str
+    target_text: str
+    match_type: str  # "exact", "contains"
+    project_id: int | None

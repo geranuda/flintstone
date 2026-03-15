@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Language, Project, Translation, TranslationKey
+from ..models import Language, Project, Translation, TranslationKey, TranslationMemory
 from ..schemas import (
     BulkTranslationRequest,
     KeyCreate,
@@ -133,6 +133,33 @@ def set_translation(
     else:
         translation = Translation(key_id=key_id, language_id=language_id, value=data.value)
         db.add(translation)
+
+    # Auto-populate translation memory: find all other language translations
+    # for this key and create source->target TM entries
+    other_translations = db.query(Translation).join(Language, Translation.language_id == Language.id).filter(
+        Translation.key_id == key_id,
+        Translation.language_id != language_id,
+    ).all()
+    for other in other_translations:
+        other_lang = db.query(Language).filter(Language.id == other.language_id).first()
+        if other_lang:
+            # Store both directions
+            for src_l, src_t, tgt_l, tgt_t in [
+                (other_lang.code, other.value, lang.code, data.value),
+                (lang.code, data.value, other_lang.code, other.value),
+            ]:
+                existing_tm = db.query(TranslationMemory).filter(
+                    TranslationMemory.source_lang == src_l,
+                    TranslationMemory.source_text == src_t,
+                    TranslationMemory.target_lang == tgt_l,
+                    TranslationMemory.target_text == tgt_t,
+                ).first()
+                if not existing_tm:
+                    db.add(TranslationMemory(
+                        source_lang=src_l, source_text=src_t,
+                        target_lang=tgt_l, target_text=tgt_t,
+                        project_id=tk.project_id,
+                    ))
 
     db.commit()
     db.refresh(translation)

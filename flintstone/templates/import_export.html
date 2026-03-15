@@ -26,6 +26,10 @@
         <h4>CSV (all languages)</h4>
         <a href="/api/projects/{{ project.id }}/export?format=csv"
            role="button" class="outline" download>Download CSV</a>
+
+        <h4>TMX (Translation Memory eXchange)</h4>
+        <a href="/api/projects/{{ project.id }}/export/tmx"
+           role="button" class="outline" download>Download TMX</a>
     </article>
 
     <!-- Import -->
@@ -58,9 +62,40 @@
             <button type="submit" class="secondary">Import CSV</button>
         </form>
 
+        <h4>TMX file</h4>
+        <form id="import-tmx-form" onsubmit="return importTMX(event)">
+            <label>
+                Source Language
+                <select name="source_lang">
+                    {% for lang in languages %}
+                    <option value="{{ lang.code }}" {% if lang.code == 'en' %}selected{% endif %}>{{ lang.code }} — {{ lang.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                File
+                <input type="file" name="file" accept=".tmx,.xml" required>
+            </label>
+            <div class="grid">
+                <button type="submit">Import to Project</button>
+                <button type="button" class="secondary" onclick="importTMXToMemory()">Import to Memory Only</button>
+            </div>
+        </form>
+
         <div id="import-result"></div>
     </article>
 </div>
+
+<!-- Translation Memory -->
+<article>
+    <header><h3>Translation Memory</h3></header>
+    <p>Translation memory stores past translations and suggests them when editing. It is automatically populated as you translate.</p>
+    <div class="grid">
+        <a href="/api/memory/export/tmx" role="button" class="outline" download>Export TM as TMX</a>
+        <button class="secondary outline" onclick="clearMemory()">Clear Translation Memory</button>
+    </div>
+    <div id="tm-stats" style="margin-top: 1rem;"></div>
+</article>
 
 <script>
 async function importFile(e, format) {
@@ -76,16 +111,83 @@ async function importFile(e, format) {
 
     const res = await fetch(url, { method: 'POST', body: formData });
     const data = await res.json();
-    const resultDiv = document.getElementById('import-result');
+    showResult(res.ok, data);
+    return false;
+}
 
+async function importTMX(e) {
+    e.preventDefault();
+    const form = document.getElementById('import-tmx-form');
+    const formData = new FormData();
+    formData.append('file', form.file.files[0]);
+    const sourceLang = form.source_lang.value;
+
+    const res = await fetch(`/api/projects/{{ project.id }}/import/tmx?source_lang=${sourceLang}`, {
+        method: 'POST', body: formData
+    });
+    const data = await res.json();
     if (res.ok) {
+        document.getElementById('import-result').innerHTML = `<div class="flash flash-success">
+            TMX import complete: ${data.total_units} units processed.
+            ${data.created_keys} new keys, ${data.created_translations} new translations,
+            ${data.updated_translations} updated, ${data.tm_entries_added} TM entries added.
+        </div>`;
+    } else {
+        document.getElementById('import-result').innerHTML =
+            `<div class="flash flash-error">Error: ${data.detail || 'Import failed'}</div>`;
+    }
+    return false;
+}
+
+async function importTMXToMemory() {
+    const form = document.getElementById('import-tmx-form');
+    if (!form.file.files[0]) { alert('Select a TMX file first'); return; }
+    const formData = new FormData();
+    formData.append('file', form.file.files[0]);
+    const sourceLang = form.source_lang.value;
+
+    const res = await fetch(`/api/memory/import/tmx?source_lang=${sourceLang}`, {
+        method: 'POST', body: formData
+    });
+    const data = await res.json();
+    if (res.ok) {
+        document.getElementById('import-result').innerHTML = `<div class="flash flash-success">
+            TMX imported to memory: ${data.entries_added} entries from ${data.total_units} units.
+        </div>`;
+    } else {
+        document.getElementById('import-result').innerHTML =
+            `<div class="flash flash-error">Error: ${data.detail || 'Import failed'}</div>`;
+    }
+}
+
+async function clearMemory() {
+    if (!confirm('Clear all translation memory entries? This cannot be undone.')) return;
+    await fetch('/api/memory', { method: 'DELETE' });
+    document.getElementById('import-result').innerHTML =
+        '<div class="flash flash-success">Translation memory cleared.</div>';
+    loadTMStats();
+}
+
+function showResult(ok, data) {
+    const resultDiv = document.getElementById('import-result');
+    if (ok) {
         resultDiv.innerHTML = `<div class="flash flash-success">
             Import complete: ${data.created_keys} new keys, ${data.created_translations} new translations, ${data.updated_translations} updated.
         </div>`;
     } else {
         resultDiv.innerHTML = `<div class="flash flash-error">Error: ${data.detail || 'Import failed'}</div>`;
     }
-    return false;
 }
+
+async function loadTMStats() {
+    const res = await fetch('/api/memory?limit=1');
+    const data = await res.json();
+    const statsDiv = document.getElementById('tm-stats');
+    const countRes = await fetch('/api/memory?limit=200');
+    const entries = await countRes.json();
+    statsDiv.innerHTML = `<small>Translation memory contains ${entries.length}${entries.length >= 200 ? '+' : ''} entries.</small>`;
+}
+
+loadTMStats();
 </script>
 {% endblock %}
