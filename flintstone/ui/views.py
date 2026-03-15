@@ -16,6 +16,24 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 router = APIRouter(tags=["ui"])
 
 
+def _parse_tags(tk: TranslationKey) -> list[str]:
+    if not tk.tags:
+        return []
+    return [t.strip() for t in tk.tags.split(",") if t.strip()]
+
+
+def _get_project_tags(project_id: int, db: Session) -> list[dict]:
+    keys = db.query(TranslationKey).filter(
+        TranslationKey.project_id == project_id,
+        TranslationKey.tags != "",
+    ).all()
+    tag_counts: dict[str, int] = {}
+    for tk in keys:
+        for tag in _parse_tags(tk):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    return [{"tag": t, "count": c} for t, c in sorted(tag_counts.items())]
+
+
 @router.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db)):
     projects = db.query(Project).order_by(Project.name).all()
@@ -67,12 +85,14 @@ def project_detail(project_id: int, request: Request, db: Session = Depends(get_
             "total": key_count,
             "percentage": round(translated / key_count * 100, 1) if key_count > 0 else 0,
         })
+    tags = _get_project_tags(project_id, db)
     return templates.TemplateResponse("project.html", {
         "request": request,
         "project": project,
         "key_count": key_count,
         "languages": languages,
         "stats": stats,
+        "tags": tags,
     })
 
 
@@ -81,6 +101,7 @@ def translation_editor(
     project_id: int,
     request: Request,
     q: str = "",
+    tag: str = "",
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -92,7 +113,13 @@ def translation_editor(
     query = db.query(TranslationKey).filter(TranslationKey.project_id == project_id)
     if q:
         query = query.filter(TranslationKey.key.ilike(f"%{q}%"))
+    if tag:
+        query = query.filter(TranslationKey.tags.ilike(f"%{tag}%"))
     keys = query.order_by(TranslationKey.key).limit(200).all()
+
+    # Post-filter for exact tag match
+    if tag:
+        keys = [k for k in keys if tag in _parse_tags(k)]
 
     rows = []
     for tk in keys:
@@ -101,7 +128,9 @@ def translation_editor(
             lang = db.query(Language).filter(Language.id == t.language_id).first()
             if lang:
                 trans[lang.code] = {"id": t.id, "value": t.value, "language_id": lang.id}
-        rows.append({"key": tk, "translations": trans})
+        rows.append({"key": tk, "translations": trans, "tags": _parse_tags(tk)})
+
+    all_tags = _get_project_tags(project_id, db)
 
     return templates.TemplateResponse("translations.html", {
         "request": request,
@@ -109,6 +138,8 @@ def translation_editor(
         "languages": languages,
         "rows": rows,
         "search_query": q,
+        "active_tag": tag,
+        "all_tags": all_tags,
     })
 
 

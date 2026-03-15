@@ -50,11 +50,13 @@ class LanguageResponse(BaseModel):
 class KeyCreate(BaseModel):
     key: str = Field(..., min_length=1, max_length=500)
     description: str = ""
+    tags: list[str] = []
 
 
 class KeyUpdate(BaseModel):
     key: str | None = None
     description: str | None = None
+    tags: list[str] | None = None
 
 
 class KeyResponse(BaseModel):
@@ -62,6 +64,7 @@ class KeyResponse(BaseModel):
     project_id: int
     key: str
     description: str | None
+    tags: list[str] = []
     created_at: datetime
     translations: dict[str, str] = {}  # lang_code -> value
     model_config = {"from_attributes": True}
@@ -90,6 +93,43 @@ class BulkTranslationItem(BaseModel):
 
 class BulkTranslationRequest(BaseModel):
     translations: list[BulkTranslationItem]
+
+
+# --- Find & Replace ---
+
+class FindReplaceRequest(BaseModel):
+    find: str = Field(..., min_length=1)
+    replace: str
+    language_code: str | None = None  # None = all languages
+    preview: bool = True  # True = dry run, False = apply
+
+
+class FindReplaceMatch(BaseModel):
+    key_id: int
+    key: str
+    language_code: str
+    old_value: str
+    new_value: str
+
+
+class FindReplaceResponse(BaseModel):
+    matches: list[FindReplaceMatch]
+    total: int
+    applied: bool
+
+
+# --- TM Fill-up ---
+
+class FillUpRequest(BaseModel):
+    source_lang: str
+    target_lang: str
+    match_type: str = "exact"  # "exact" or "contains"
+
+
+class FillUpResult(BaseModel):
+    filled: int
+    skipped: int
+    total_missing: int
 
 
 # --- Stats ---

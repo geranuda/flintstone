@@ -25,6 +25,18 @@
         margin-left: 0.5rem;
     }
     .tm-source { color: var(--pico-muted-color); font-size: 0.75rem; }
+    .tag { display: inline-block; padding: 0.1rem 0.4rem; margin: 0.1rem;
+           border-radius: 0.75rem; font-size: 0.7rem;
+           background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
+    .tag-filter { cursor: pointer; }
+    .tag-filter:hover { opacity: 0.7; }
+    .panel { border: 1px solid var(--pico-muted-border-color); border-radius: 0.5rem;
+             padding: 1rem; margin-bottom: 1rem; }
+    .panel h4 { margin-top: 0; }
+    .fr-preview { max-height: 200px; overflow-y: auto; font-size: 0.85rem; }
+    .fr-preview table { margin: 0; }
+    .fr-old { background: #fdd; }
+    .fr-new { background: #dfd; }
 </style>
 {% endblock %}
 {% block content %}
@@ -36,26 +48,104 @@
     </p>
 </hgroup>
 
-<!-- Search -->
+<!-- Search + Tag Filter -->
 <form method="get" action="/projects/{{ project.id }}/translate">
     <div class="grid">
         <input type="search" name="q" value="{{ search_query }}" placeholder="Search keys...">
-        <button type="submit">Search</button>
-        {% if search_query %}<a href="/projects/{{ project.id }}/translate" role="button" class="outline">Clear</a>{% endif %}
+        <select name="tag" onchange="this.form.submit()">
+            <option value="">All tags</option>
+            {% for t in all_tags %}
+            <option value="{{ t.tag }}" {% if active_tag == t.tag %}selected{% endif %}>{{ t.tag }} ({{ t.count }})</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Filter</button>
+        {% if search_query or active_tag %}<a href="/projects/{{ project.id }}/translate" role="button" class="outline">Clear</a>{% endif %}
     </div>
 </form>
 
-<!-- Add Key Inline -->
-<details>
-    <summary role="button" class="outline btn-sm">Add Key</summary>
-    <form id="add-key-form" onsubmit="return addKey(event)">
-        <div class="grid">
-            <input type="text" name="key" required placeholder="translation.key">
-            <input type="text" name="description" placeholder="Description (optional)">
-            <button type="submit">Add</button>
+<!-- Toolbar -->
+<div class="grid" style="margin-bottom: 1rem;">
+    <!-- Add Key -->
+    <details>
+        <summary role="button" class="outline btn-sm">Add Key</summary>
+        <form id="add-key-form" onsubmit="return addKey(event)">
+            <div class="grid">
+                <input type="text" name="key" required placeholder="translation.key">
+                <input type="text" name="description" placeholder="Description">
+                <input type="text" name="tags" placeholder="Tags (comma-separated)">
+                <button type="submit">Add</button>
+            </div>
+        </form>
+    </details>
+
+    <!-- Find & Replace -->
+    <details>
+        <summary role="button" class="outline btn-sm secondary">Find & Replace</summary>
+        <div class="panel">
+            <div class="grid">
+                <label>
+                    Find
+                    <input type="text" id="fr-find" placeholder="Text to find">
+                </label>
+                <label>
+                    Replace with
+                    <input type="text" id="fr-replace" placeholder="Replacement text">
+                </label>
+                <label>
+                    Language
+                    <select id="fr-lang">
+                        <option value="">All languages</option>
+                        {% for lang in languages %}
+                        <option value="{{ lang.code }}">{{ lang.code }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="actions">
+                <button class="btn-sm outline" onclick="findReplace(true)">Preview</button>
+                <button class="btn-sm" onclick="findReplace(false)">Apply</button>
+            </div>
+            <div id="fr-result" class="fr-preview" style="margin-top: 0.5rem;"></div>
         </div>
-    </form>
-</details>
+    </details>
+
+    <!-- TM Fill-up -->
+    <details>
+        <summary role="button" class="outline btn-sm contrast">TM Fill-up</summary>
+        <div class="panel">
+            <p style="font-size:0.85rem;">Auto-fill untranslated keys using translation memory matches.</p>
+            <div class="grid">
+                <label>
+                    Source language
+                    <select id="fillup-source">
+                        {% for lang in languages %}
+                        <option value="{{ lang.code }}" {% if lang.code == 'en' %}selected{% endif %}>{{ lang.code }} — {{ lang.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Target language
+                    <select id="fillup-target">
+                        {% for lang in languages %}
+                        {% if lang.code != 'en' %}
+                        <option value="{{ lang.code }}">{{ lang.code }} — {{ lang.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    Match type
+                    <select id="fillup-match">
+                        <option value="exact">Exact only</option>
+                        <option value="contains">Contains (fuzzy)</option>
+                    </select>
+                </label>
+            </div>
+            <button class="btn-sm" onclick="tmFillup()">Run Fill-up</button>
+            <div id="fillup-result" style="margin-top: 0.5rem;"></div>
+        </div>
+    </details>
+</div>
 
 <!-- Translation Grid -->
 <div class="grid-editor">
@@ -72,7 +162,12 @@
         <tbody>
             {% for row in rows %}
             <tr>
-                <td class="key-col" title="{{ row.key.description or '' }}">{{ row.key.key }}</td>
+                <td class="key-col" title="{{ row.key.description or '' }}">
+                    {{ row.key.key }}
+                    {% for tag in row.tags %}
+                    <span class="tag tag-filter" onclick="filterByTag('{{ tag }}')">{{ tag }}</span>
+                    {% endfor %}
+                </td>
                 {% for lang in languages %}
                 <td style="position:relative;">
                     <input type="text"
@@ -107,12 +202,9 @@ async function saveTranslation(input) {
     const langId = input.dataset.langId;
     const value = input.value;
     if (!value.trim()) return;
-
     input.style.borderColor = '#ffc107';
     const res = await fetch(`/api/translations/${keyId}/${langId}`, {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ value })
+        method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ value })
     });
     if (res.ok) {
         input.style.borderColor = '#28a745';
@@ -125,7 +217,8 @@ async function saveTranslation(input) {
 async function addKey(e) {
     e.preventDefault();
     const form = e.target;
-    const data = { key: form.key.value, description: form.description.value };
+    const tags = form.tags.value ? form.tags.value.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const data = { key: form.key.value, description: form.description.value, tags };
     const res = await fetch('/api/projects/{{ project.id }}/keys', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
@@ -140,42 +233,92 @@ async function deleteKey(keyId) {
     location.reload();
 }
 
+function filterByTag(tag) {
+    const url = new URL(window.location);
+    url.searchParams.set('tag', tag);
+    window.location = url;
+}
+
+/* Find & Replace */
+async function findReplace(preview) {
+    const find = document.getElementById('fr-find').value;
+    const replace = document.getElementById('fr-replace').value;
+    const lang = document.getElementById('fr-lang').value;
+    if (!find) { alert('Enter text to find'); return; }
+
+    const body = { find, replace, preview, language_code: lang || null };
+    const res = await fetch('/api/projects/{{ project.id }}/translations/find-replace', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    const resultDiv = document.getElementById('fr-result');
+
+    if (!res.ok) { resultDiv.innerHTML = `<p style="color:red">${data.detail}</p>`; return; }
+
+    if (data.total === 0) {
+        resultDiv.innerHTML = '<p>No matches found.</p>';
+        return;
+    }
+
+    if (data.applied) {
+        resultDiv.innerHTML = `<div class="flash flash-success">Replaced ${data.total} occurrences.</div>`;
+        setTimeout(() => location.reload(), 1000);
+        return;
+    }
+
+    let html = `<p><strong>${data.total} matches found:</strong></p><table><thead><tr><th>Key</th><th>Lang</th><th>Before</th><th>After</th></tr></thead><tbody>`;
+    for (const m of data.matches) {
+        html += `<tr><td><code>${m.key}</code></td><td>${m.language_code}</td><td class="fr-old">${m.old_value}</td><td class="fr-new">${m.new_value}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    resultDiv.innerHTML = html;
+}
+
+/* TM Fill-up */
+async function tmFillup() {
+    const source_lang = document.getElementById('fillup-source').value;
+    const target_lang = document.getElementById('fillup-target').value;
+    const match_type = document.getElementById('fillup-match').value;
+
+    const res = await fetch(`/api/memory/fillup/{{ project.id }}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ source_lang, target_lang, match_type })
+    });
+    const data = await res.json();
+    const resultDiv = document.getElementById('fillup-result');
+
+    if (res.ok) {
+        resultDiv.innerHTML = `<div class="flash flash-success">
+            Fill-up complete: ${data.filled} translations filled, ${data.skipped} skipped, ${data.total_missing} total missing.
+        </div>`;
+        if (data.filled > 0) setTimeout(() => location.reload(), 1500);
+    } else {
+        resultDiv.innerHTML = `<div class="flash flash-error">${data.detail || 'Error'}</div>`;
+    }
+}
+
 /* Translation Memory suggestions */
 let tmTimeout = null;
 let activeDropdown = null;
 
 async function fetchTMSuggestions(input) {
-    // Find the source text: look for the first language column with a value in this row
     const row = input.closest('tr');
     const allInputs = row.querySelectorAll('input[data-lang-code]');
     const targetLang = input.dataset.langCode;
-    let sourceText = '';
-    let sourceLang = '';
-
+    let sourceText = '', sourceLang = '';
     for (const inp of allInputs) {
         if (inp.dataset.langCode !== targetLang && inp.value.trim()) {
-            sourceText = inp.value.trim();
-            sourceLang = inp.dataset.langCode;
-            break;
+            sourceText = inp.value.trim(); sourceLang = inp.dataset.langCode; break;
         }
     }
-
     if (!sourceText || !sourceLang) return;
-
-    // Debounce
     clearTimeout(tmTimeout);
     tmTimeout = setTimeout(async () => {
-        const params = new URLSearchParams({
-            source: sourceText,
-            source_lang: sourceLang,
-            target_lang: targetLang,
-            limit: '5'
-        });
+        const params = new URLSearchParams({ source: sourceText, source_lang: sourceLang, target_lang: targetLang, limit: '5' });
         const res = await fetch(`/api/memory/suggest?${params}`);
         if (!res.ok) return;
         const suggestions = await res.json();
         if (suggestions.length === 0) return;
-
         showTMDropdown(input, suggestions);
     }, 300);
 }
@@ -184,28 +327,21 @@ function showTMDropdown(input, suggestions) {
     hideTMDropdown();
     const dropdown = document.createElement('div');
     dropdown.className = 'tm-dropdown';
-
     for (const s of suggestions) {
         const item = document.createElement('div');
         item.innerHTML = `${s.target_text} <span class="tm-match-type">${s.match_type}</span><br><span class="tm-source">${s.source_text}</span>`;
         item.onmousedown = (e) => {
-            e.preventDefault();
-            input.value = s.target_text;
-            input.dispatchEvent(new Event('change'));
-            hideTMDropdown();
+            e.preventDefault(); input.value = s.target_text;
+            input.dispatchEvent(new Event('change')); hideTMDropdown();
         };
         dropdown.appendChild(item);
     }
-
     input.parentElement.appendChild(dropdown);
     activeDropdown = dropdown;
 }
 
 function hideTMDropdown() {
-    if (activeDropdown) {
-        activeDropdown.remove();
-        activeDropdown = null;
-    }
+    if (activeDropdown) { activeDropdown.remove(); activeDropdown = null; }
 }
 </script>
 {% endblock %}

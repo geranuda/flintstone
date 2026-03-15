@@ -1,11 +1,11 @@
 """Translation Memory API endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import TranslationMemory
-from ..schemas import TMEntry, TMSuggestion
+from ..models import Language, Project, Translation, TranslationKey, TranslationMemory
+from ..schemas import FillUpRequest, FillUpResult, TMEntry, TMSuggestion
 
 router = APIRouter(prefix="/api/memory", tags=["translation-memory"])
 
@@ -82,3 +82,76 @@ def list_memory(
 def clear_memory(db: Session = Depends(get_db)):
     db.query(TranslationMemory).delete()
     db.commit()
+
+
+# --- TM Fill-up ---
+
+@router.post("/fillup/{project_id}", response_model=FillUpResult)
+def tm_fillup(
+    project_id: int, data: FillUpRequest, db: Session = Depends(get_db)
+):
+    """Auto-fill untranslated keys from translation memory matches."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    source_lang = db.query(Language).filter(Language.code == data.source_lang).first()
+    target_lang = db.query(Language).filter(Language.code == data.target_lang).first()
+    if not source_lang or not target_lang:
+        raise HTTPException(404, "Language not found")
+
+    # Find all keys in the project
+    keys = db.query(TranslationKey).filter(
+        TranslationKey.project_id == project_id
+    ).all()
+
+    filled = 0
+    skipped = 0
+    total_missing = 0
+
+    for tk in keys:
+        # Check if target translation already exists
+        existing_target = db.query(Translation).filter(
+            Translation.key_id == tk.id,
+            Translation.language_id == target_lang.id,
+        ).first()
+        if existing_target:
+            continue  # already translated
+
+        # Get source translation
+        source_translation = db.query(Translation).filter(
+            Translation.key_id == tk.id,
+            Translation.language_id == source_lang.id,
+        ).first()
+        if not source_translation:
+            total_missing += 1
+            skipped += 1
+            continue
+
+        total_missing += 1
+
+        # Look up TM for a match
+        if data.match_type == "exact":
+            tm_match = db.query(TranslationMemory).filter(
+                TranslationMemory.source_lang == data.source_lang,
+                TranslationMemory.target_lang == data.target_lang,
+                TranslationMemory.source_text == source_translation.value,
+            ).first()
+        else:
+            tm_match = db.query(TranslationMemory).filter(
+                TranslationMemory.source_lang == data.source_lang,
+                TranslationMemory.target_lang == data.target_lang,
+                TranslationMemory.source_text.ilike(f"%{source_translation.value}%"),
+            ).first()
+
+        if tm_match:
+            new_translation = Translation(
+                key_id=tk.id, language_id=target_lang.id, value=tm_match.target_text,
+            )
+            db.add(new_translation)
+            filled += 1
+        else:
+            skipped += 1
+
+    db.commit()
+    return FillUpResult(filled=filled, skipped=skipped, total_missing=total_missing)

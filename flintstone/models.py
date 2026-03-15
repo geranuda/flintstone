@@ -46,6 +46,7 @@ class TranslationKey(Base):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     key: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, default="")
+    tags: Mapped[str] = mapped_column(Text, default="")  # comma-separated tags
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="keys")
