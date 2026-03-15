@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} - Flintstone{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>{{ project.name }}</h2>
+    <p>{{ project.description or "No description" }} &mdash; {{ key_count }} keys</p>
+</hgroup>
+
+<div class="grid">
+    <a href="/projects/{{ project.id }}/translate" role="button">Translation Editor</a>
+    <a href="/projects/{{ project.id }}/import-export" role="button" class="secondary">Import / Export</a>
+    <a href="/" role="button" class="outline">Back to Dashboard</a>
+</div>
+
+<!-- Add Key Form -->
+<details open>
+    <summary role="button" class="outline">Add Translation Key</summary>
+    <form id="add-key-form" onsubmit="return addKey(event)">
+        <div class="grid">
+            <label>
+                Key
+                <input type="text" name="key" required placeholder="common.save_button">
+            </label>
+            <label>
+                Description
+                <input type="text" name="description" placeholder="Save button label">
+            </label>
+        </div>
+        <button type="submit">Add Key</button>
+    </form>
+</details>
+
+<!-- Language Stats -->
+<h3>Translation Progress</h3>
+{% if stats %}
+<div class="stats-grid">
+    {% for s in stats %}
+    <article class="stat-card">
+        <h4>{{ s.language.name }} ({{ s.language.code }})</h4>
+        <progress value="{{ s.translated }}" max="{{ s.total }}"></progress>
+        <p>{{ s.translated }} / {{ s.total }} ({{ s.percentage }}%)</p>
+    </article>
+    {% endfor %}
+</div>
+{% else %}
+<p>No languages configured. <a href="/">Add languages from the dashboard</a>.</p>
+{% endif %}
+
+<script>
+async function addKey(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = { key: form.key.value, description: form.description.value };
+    const res = await fetch('/api/projects/{{ project.id }}/keys', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { form.reset(); location.reload(); }
+    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    return false;
+}
+</script>
+{% endblock %}

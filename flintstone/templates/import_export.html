@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Import/Export - {{ project.name }} - Flintstone{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>{{ project.name }} — Import / Export</h2>
+    <p><a href="/projects/{{ project.id }}">Back to project</a></p>
+</hgroup>
+
+<div class="grid">
+    <!-- Export -->
+    <article>
+        <header><h3>Export</h3></header>
+
+        <h4>JSON (per language)</h4>
+        {% if languages %}
+        <div class="actions" style="flex-wrap: wrap; margin-bottom: 1rem;">
+            {% for lang in languages %}
+            <a href="/api/projects/{{ project.id }}/export?format=json&lang={{ lang.code }}"
+               role="button" class="outline btn-sm" download>{{ lang.code }}.json</a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>No languages configured.</p>
+        {% endif %}
+
+        <h4>CSV (all languages)</h4>
+        <a href="/api/projects/{{ project.id }}/export?format=csv"
+           role="button" class="outline" download>Download CSV</a>
+    </article>
+
+    <!-- Import -->
+    <article>
+        <header><h3>Import</h3></header>
+
+        <h4>JSON file</h4>
+        <form id="import-json-form" onsubmit="return importFile(event, 'json')">
+            <label>
+                Language
+                <select name="lang" required>
+                    {% for lang in languages %}
+                    <option value="{{ lang.code }}">{{ lang.code }} — {{ lang.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                File
+                <input type="file" name="file" accept=".json" required>
+            </label>
+            <button type="submit">Import JSON</button>
+        </form>
+
+        <h4>CSV file</h4>
+        <form id="import-csv-form" onsubmit="return importFile(event, 'csv')">
+            <label>
+                File
+                <input type="file" name="file" accept=".csv" required>
+            </label>
+            <button type="submit" class="secondary">Import CSV</button>
+        </form>
+
+        <div id="import-result"></div>
+    </article>
+</div>
+
+<script>
+async function importFile(e, format) {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData();
+    formData.append('file', form.file.files[0]);
+
+    let url = `/api/projects/{{ project.id }}/import`;
+    if (format === 'json') {
+        url += `?lang=${form.lang.value}`;
+    }
+
+    const res = await fetch(url, { method: 'POST', body: formData });
+    const data = await res.json();
+    const resultDiv = document.getElementById('import-result');
+
+    if (res.ok) {
+        resultDiv.innerHTML = `<div class="flash flash-success">
+            Import complete: ${data.created_keys} new keys, ${data.created_translations} new translations, ${data.updated_translations} updated.
+        </div>`;
+    } else {
+        resultDiv.innerHTML = `<div class="flash flash-error">Error: ${data.detail || 'Import failed'}</div>`;
+    }
+    return false;
+}
+</script>
+{% endblock %}

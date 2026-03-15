@@ -1,0 +1,18 @@
+{% for row in rows %}
+<tr>
+    <td class="key-col">{{ row.key.key }}</td>
+    {% for lang in languages %}
+    <td>
+        <input type="text"
+               value="{{ row.translations.get(lang.code, {}).get('value', '') }}"
+               data-key-id="{{ row.key.id }}"
+               data-lang-id="{{ lang.id }}"
+               onchange="saveTranslation(this)"
+               placeholder="{{ lang.code }}">
+    </td>
+    {% endfor %}
+    <td>
+        <button class="btn-sm outline secondary" onclick="deleteKey({{ row.key.id }})">x</button>
+    </td>
+</tr>
+{% endfor %}

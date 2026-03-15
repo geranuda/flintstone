@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Translate - {{ project.name }} - Flintstone{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>{{ project.name }} — Translation Editor</h2>
+    <p>
+        <a href="/projects/{{ project.id }}">Project Detail</a> |
+        <a href="/projects/{{ project.id }}/import-export">Import/Export</a>
+    </p>
+</hgroup>
+
+<!-- Search -->
+<form method="get" action="/projects/{{ project.id }}/translate">
+    <div class="grid">
+        <input type="search" name="q" value="{{ search_query }}" placeholder="Search keys...">
+        <button type="submit">Search</button>
+        {% if search_query %}<a href="/projects/{{ project.id }}/translate" role="button" class="outline">Clear</a>{% endif %}
+    </div>
+</form>
+
+<!-- Add Key Inline -->
+<details>
+    <summary role="button" class="outline btn-sm">Add Key</summary>
+    <form id="add-key-form" onsubmit="return addKey(event)">
+        <div class="grid">
+            <input type="text" name="key" required placeholder="translation.key">
+            <input type="text" name="description" placeholder="Description (optional)">
+            <button type="submit">Add</button>
+        </div>
+    </form>
+</details>
+
+<!-- Translation Grid -->
+<div class="grid-editor">
+    <table role="grid">
+        <thead>
+            <tr>
+                <th class="key-col">Key</th>
+                {% for lang in languages %}
+                <th>{{ lang.code }} ({{ lang.name }})</th>
+                {% endfor %}
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                <td class="key-col" title="{{ row.key.description or '' }}">{{ row.key.key }}</td>
+                {% for lang in languages %}
+                <td>
+                    <input type="text"
+                           value="{{ row.translations.get(lang.code, {}).get('value', '') }}"
+                           data-key-id="{{ row.key.id }}"
+                           data-lang-id="{{ lang.id }}"
+                           data-lang-code="{{ lang.code }}"
+                           onchange="saveTranslation(this)"
+                           placeholder="Enter {{ lang.code }} translation">
+                </td>
+                {% endfor %}
+                <td>
+                    <button class="btn-sm outline secondary" onclick="deleteKey({{ row.key.id }})">x</button>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not rows %}
+            <tr>
+                <td colspan="{{ languages|length + 2 }}">No translation keys found. Add one above.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+async function saveTranslation(input) {
+    const keyId = input.dataset.keyId;
+    const langId = input.dataset.langId;
+    const value = input.value;
+    if (!value.trim()) return;
+
+    input.style.borderColor = '#ffc107';
+    const res = await fetch(`/api/translations/${keyId}/${langId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ value })
+    });
+    if (res.ok) {
+        input.style.borderColor = '#28a745';
+        setTimeout(() => { input.style.borderColor = 'transparent'; }, 1500);
+    } else {
+        input.style.borderColor = '#dc3545';
+    }
+}
+
+async function addKey(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = { key: form.key.value, description: form.description.value };
+    const res = await fetch('/api/projects/{{ project.id }}/keys', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { location.reload(); }
+    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    return false;
+}
+
+async function deleteKey(keyId) {
+    if (!confirm('Delete this key and all its translations?')) return;
+    await fetch(`/api/keys/${keyId}`, { method: 'DELETE' });
+    location.reload();
+}
+</script>
+{% endblock %}

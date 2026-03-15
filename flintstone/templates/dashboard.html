@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Flintstone{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>Projects</h2>
+    <p>Manage your translation projects</p>
+</hgroup>
+
+<!-- Create Project Form -->
+<details>
+    <summary role="button" class="outline">New Project</summary>
+    <form id="create-project-form" onsubmit="return createProject(event)">
+        <div class="grid">
+            <label>
+                Name
+                <input type="text" name="name" required placeholder="my-app">
+            </label>
+            <label>
+                Description
+                <input type="text" name="description" placeholder="Optional description">
+            </label>
+        </div>
+        <button type="submit">Create Project</button>
+    </form>
+</details>
+
+<!-- Add Language Form -->
+<details>
+    <summary role="button" class="outline secondary">Add Language</summary>
+    <form id="create-language-form" onsubmit="return createLanguage(event)">
+        <div class="grid">
+            <label>
+                Code
+                <input type="text" name="code" required placeholder="en" maxlength="10">
+            </label>
+            <label>
+                Name
+                <input type="text" name="name" required placeholder="English">
+            </label>
+        </div>
+        <button type="submit" class="secondary">Add Language</button>
+    </form>
+</details>
+
+{% if languages %}
+<p><small>Languages: {% for lang in languages %}<span class="badge">{{ lang.code }}</span> {% endfor %}</small></p>
+{% endif %}
+
+<!-- Project List -->
+{% if projects %}
+<table>
+    <thead>
+        <tr>
+            <th>Project</th>
+            <th>Keys</th>
+            {% for lang in languages %}
+            <th>{{ lang.code }}</th>
+            {% endfor %}
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in projects %}
+        <tr>
+            <td>
+                <a href="/projects/{{ item.project.id }}"><strong>{{ item.project.name }}</strong></a>
+                {% if item.project.description %}<br><small>{{ item.project.description }}</small>{% endif %}
+            </td>
+            <td>{{ item.key_count }}</td>
+            {% for lang in languages %}
+            <td>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" style="width: {{ item.completion.get(lang.code, 0) }}%"></div>
+                </div>
+                <small>{{ item.completion.get(lang.code, 0) }}%</small>
+            </td>
+            {% endfor %}
+            <td>
+                <div class="actions">
+                    <a href="/projects/{{ item.project.id }}/translate" role="button" class="btn-sm outline">Translate</a>
+                    <button class="btn-sm outline secondary" onclick="deleteProject({{ item.project.id }})">Delete</button>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No projects yet. Create one above to get started.</p>
+{% endif %}
+
+<script>
+async function createProject(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = { name: form.name.value, description: form.description.value };
+    const res = await fetch('/api/projects', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { location.reload(); }
+    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    return false;
+}
+
+async function createLanguage(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = { code: form.code.value, name: form.name.value };
+    const res = await fetch('/api/languages', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { location.reload(); }
+    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    return false;
+}
+
+async function deleteProject(id) {
+    if (!confirm('Delete this project and all its translations?')) return;
+    await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    location.reload();
+}
+</script>
+{% endblock %}

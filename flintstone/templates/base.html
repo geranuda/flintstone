@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Flintstone{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --pico-font-size: 15px;
+        }
+        nav {
+            background: var(--pico-primary-background);
+            padding: 0.5rem 1rem;
+            margin-bottom: 1rem;
+        }
+        nav ul { margin: 0; }
+        nav a { color: var(--pico-primary-inverse); text-decoration: none; }
+        .badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.8rem;
+            background: var(--pico-primary);
+            color: var(--pico-primary-inverse);
+        }
+        .progress-bar {
+            background: var(--pico-muted-border-color);
+            border-radius: 0.25rem;
+            height: 0.5rem;
+            overflow: hidden;
+            display: inline-block;
+            width: 100px;
+            vertical-align: middle;
+        }
+        .progress-bar-fill {
+            background: var(--pico-primary);
+            height: 100%;
+            transition: width 0.3s;
+        }
+        .grid-editor {
+            overflow-x: auto;
+        }
+        .grid-editor table {
+            min-width: 100%;
+        }
+        .grid-editor td input,
+        .grid-editor td textarea {
+            margin: 0;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.85rem;
+            border: 1px solid transparent;
+            background: transparent;
+            width: 100%;
+        }
+        .grid-editor td input:focus,
+        .grid-editor td textarea:focus {
+            border-color: var(--pico-primary);
+            background: var(--pico-background-color);
+            outline: none;
+        }
+        .grid-editor th { font-size: 0.85rem; white-space: nowrap; }
+        .grid-editor td { padding: 0.15rem; vertical-align: top; }
+        .key-col { min-width: 200px; font-family: monospace; font-size: 0.85rem; }
+        .flash { padding: 0.75rem; margin-bottom: 1rem; border-radius: 0.25rem; }
+        .flash-success { background: #d4edda; color: #155724; }
+        .flash-error { background: #f8d7da; color: #721c24; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+        .stat-card { padding: 1rem; border: 1px solid var(--pico-muted-border-color); border-radius: 0.5rem; }
+        .actions { display: flex; gap: 0.5rem; align-items: center; }
+        .btn-sm {
+            padding: 0.25rem 0.75rem;
+            font-size: 0.85rem;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav>
+        <ul>
+            <li><a href="/"><strong>Flintstone</strong></a></li>
+        </ul>
+        <ul>
+            <li><a href="/">Projects</a></li>
+            <li><a href="/api/docs" target="_blank">API Docs</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        <div id="flash-container"></div>
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/app.js"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
