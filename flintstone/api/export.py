@@ -24,7 +24,7 @@ def _get_project_or_404(project_id: int, db: Session) -> Project:
 @router.get("/export")
 def export_translations(
     project_id: int,
-    format: str = Query("json", pattern="^(json|csv)$"),
+    format: str = Query("json", pattern="^(json|csv|po|xliff)$"),
     lang: str | None = Query(None, description="Language code (required for JSON)"),
     db: Session = Depends(get_db),
 ):
@@ -53,6 +53,45 @@ def export_translations(
             io.BytesIO(content.encode("utf-8")),
             media_type="application/json",
             headers={"Content-Disposition": f'attachment; filename="{project.name}_{lang}.json"'},
+        )
+
+    elif format == "po":
+        if not lang:
+            raise HTTPException(400, "Language code required for PO export")
+        language = db.query(Language).filter(Language.code == lang).first()
+        if not language:
+            raise HTTPException(404, f"Language '{lang}' not found")
+
+        from .formats import export_po
+        content = export_po(keys, language, db)
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="application/x-gettext",
+            headers={"Content-Disposition": f'attachment; filename="{project.name}_{lang}.po"'},
+        )
+
+    elif format == "xliff":
+        if not lang:
+            raise HTTPException(400, "Language code required for XLIFF export")
+        language = db.query(Language).filter(Language.code == lang).first()
+        if not language:
+            raise HTTPException(404, f"Language '{lang}' not found")
+
+        from fastapi import Query as Q
+        source_lang_code = "en"  # default source language
+        source_language = db.query(Language).filter(Language.code == source_lang_code).first()
+        if not source_language:
+            # Use the first available language as source
+            source_language = db.query(Language).first()
+            if not source_language:
+                raise HTTPException(400, "No languages configured")
+
+        from .formats import export_xliff
+        content = export_xliff(keys, source_language, language, project.name, db)
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type="application/xml",
+            headers={"Content-Disposition": f'attachment; filename="{project.name}_{lang}.xliff"'},
         )
 
     else:  # csv
@@ -95,7 +134,7 @@ async def import_translations(
     created_translations = 0
     updated_translations = 0
 
-    if filename.endswith(".json") or (lang and not filename.endswith(".csv")):
+    if filename.endswith(".json") or (lang and not filename.endswith((".csv", ".po", ".xliff", ".xlf"))):
         if not lang:
             raise HTTPException(400, "Language code required for JSON import")
         language = db.query(Language).filter(Language.code == lang).first()
@@ -180,8 +219,34 @@ async def import_translations(
                     t = Translation(key_id=tk.id, language_id=language.id, value=value)
                     db.add(t)
                     created_translations += 1
+    elif filename.endswith(".po"):
+        if not lang:
+            raise HTTPException(400, "Language code required for PO import")
+        language = db.query(Language).filter(Language.code == lang).first()
+        if not language:
+            raise HTTPException(404, f"Language '{lang}' not found")
+
+        from .formats import import_po
+        try:
+            result = import_po(content, project_id, language, db)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        created_keys = result["created_keys"]
+        created_translations = result["created_translations"]
+        updated_translations = result["updated_translations"]
+
+    elif filename.endswith((".xliff", ".xlf")):
+        from .formats import import_xliff
+        try:
+            result = import_xliff(content, project_id, db)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        created_keys = result["created_keys"]
+        created_translations = result["created_translations"]
+        updated_translations = result["updated_translations"]
+
     else:
-        raise HTTPException(400, "Unsupported file format. Use .json or .csv")
+        raise HTTPException(400, "Unsupported file format. Use .json, .csv, .po, .xliff, or .xlf")
 
     db.commit()
     return {

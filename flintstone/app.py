@@ -3,11 +3,16 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .api import export, languages, memory, projects, tmx, translations
+from .api import revisions as revisions_api
+from .api import glossary as glossary_api
+from .api import webhooks as webhooks_api
+from .api import mt as mt_api
+from .auth import require_auth
 from .database import init_db
 from .ui import views
 
@@ -33,13 +38,20 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 # Templates
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
-# API routers
-app.include_router(projects.router)
-app.include_router(languages.router)
-app.include_router(translations.router)
-app.include_router(export.router)
-app.include_router(memory.router)
-app.include_router(tmx.router)
+# Auth dependency applied to all protected routers
+auth_dep = [Depends(require_auth)]
 
-# UI router
+# API routers
+app.include_router(projects.router, dependencies=auth_dep)
+app.include_router(languages.router, dependencies=auth_dep)
+app.include_router(translations.router, dependencies=auth_dep)
+app.include_router(export.router, dependencies=auth_dep)
+app.include_router(memory.router, dependencies=auth_dep)
+app.include_router(tmx.router, dependencies=auth_dep)
+app.include_router(revisions_api.router, dependencies=auth_dep)
+app.include_router(glossary_api.router, dependencies=auth_dep)
+app.include_router(webhooks_api.router, dependencies=auth_dep)
+app.include_router(mt_api.router, dependencies=auth_dep)
+
+# UI router (includes its own auth handling for login/logout)
 app.include_router(views.router)

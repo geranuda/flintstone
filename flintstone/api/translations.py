@@ -1,10 +1,13 @@
 """Translation keys and translations API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from ..auth import get_current_user
+from ..config import settings
 from ..database import get_db
+from ..glossary_check import check_glossary
 from ..models import Language, Project, Translation, TranslationKey, TranslationMemory
 from ..schemas import (
     BulkTranslationRequest,
@@ -50,6 +53,15 @@ def _key_to_response(tk: TranslationKey, db: Session) -> KeyResponse:
     )
 
 
+def _dispatch_webhook(event: str, payload: dict, db: Session):
+    """Dispatch webhook event, silently ignoring if tables don't exist."""
+    try:
+        from ..webhook_dispatcher import dispatch_event
+        dispatch_event(event, payload, db)
+    except Exception:
+        pass
+
+
 # --- Translation Keys ---
 
 @router.get("/api/projects/{project_id}/keys", response_model=list[KeyResponse])
@@ -75,7 +87,7 @@ def list_keys(
 
 
 @router.post("/api/projects/{project_id}/keys", response_model=KeyResponse, status_code=201)
-def create_key(project_id: int, data: KeyCreate, db: Session = Depends(get_db)):
+def create_key(project_id: int, data: KeyCreate, request: Request, db: Session = Depends(get_db)):
     _get_project_or_404(project_id, db)
     existing = db.query(TranslationKey).filter(
         TranslationKey.project_id == project_id,
@@ -86,17 +98,36 @@ def create_key(project_id: int, data: KeyCreate, db: Session = Depends(get_db)):
     tags_str = ",".join(t.strip() for t in data.tags if t.strip())
     tk = TranslationKey(project_id=project_id, key=data.key, description=data.description, tags=tags_str)
     db.add(tk)
+    db.flush()
+
+    # Record revision
+    actor = get_current_user(request) or "anonymous"
+    from .revisions import record_revision
+    record_revision(db, project_id, "key", tk.id, "create", actor=actor,
+                    field_name="key", new_value=data.key,
+                    meta={"key": data.key})
+
     db.commit()
     db.refresh(tk)
+
+    _dispatch_webhook("key.created", {"key_id": tk.id, "key": tk.key, "project_id": project_id}, db)
+
     return _key_to_response(tk, db)
 
 
 @router.put("/api/keys/{key_id}", response_model=KeyResponse)
-def update_key(key_id: int, data: KeyUpdate, db: Session = Depends(get_db)):
+def update_key(key_id: int, data: KeyUpdate, request: Request, db: Session = Depends(get_db)):
     tk = db.query(TranslationKey).filter(TranslationKey.id == key_id).first()
     if not tk:
         raise HTTPException(404, "Key not found")
-    if data.key is not None:
+
+    actor = get_current_user(request) or "anonymous"
+    from .revisions import record_revision
+
+    if data.key is not None and data.key != tk.key:
+        record_revision(db, tk.project_id, "key", tk.id, "update", actor=actor,
+                        field_name="key", old_value=tk.key, new_value=data.key,
+                        meta={"key": data.key})
         tk.key = data.key
     if data.description is not None:
         tk.description = data.description
@@ -108,12 +139,21 @@ def update_key(key_id: int, data: KeyUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/api/keys/{key_id}", status_code=204)
-def delete_key(key_id: int, db: Session = Depends(get_db)):
+def delete_key(key_id: int, request: Request, db: Session = Depends(get_db)):
     tk = db.query(TranslationKey).filter(TranslationKey.id == key_id).first()
     if not tk:
         raise HTTPException(404, "Key not found")
+
+    actor = get_current_user(request) or "anonymous"
+    from .revisions import record_revision
+    record_revision(db, tk.project_id, "key", tk.id, "delete", actor=actor,
+                    field_name="key", old_value=tk.key,
+                    meta={"key": tk.key})
+
     db.delete(tk)
     db.commit()
+
+    _dispatch_webhook("key.deleted", {"key_id": key_id, "key": tk.key, "project_id": tk.project_id}, db)
 
 
 # --- Tags ---
@@ -149,7 +189,8 @@ def get_translations(
 
 @router.put("/api/translations/{key_id}/{language_id}", response_model=TranslationResponse)
 def set_translation(
-    key_id: int, language_id: int, data: TranslationUpdate, db: Session = Depends(get_db)
+    key_id: int, language_id: int, data: TranslationUpdate,
+    request: Request, db: Session = Depends(get_db)
 ):
     tk = db.query(TranslationKey).filter(TranslationKey.id == key_id).first()
     if not tk:
@@ -163,20 +204,41 @@ def set_translation(
         Translation.language_id == language_id,
     ).first()
 
+    actor = get_current_user(request) or "anonymous"
+    from .revisions import record_revision
+    old_value = translation.value if translation else None
+
     if translation:
+        record_revision(db, tk.project_id, "translation", translation.id, "update",
+                        actor=actor, field_name="value",
+                        old_value=old_value, new_value=data.value,
+                        meta={"key": tk.key, "key_id": key_id, "language": lang.code, "language_id": language_id})
         translation.value = data.value
     else:
         translation = Translation(key_id=key_id, language_id=language_id, value=data.value)
         db.add(translation)
+        db.flush()
+        record_revision(db, tk.project_id, "translation", translation.id, "create",
+                        actor=actor, field_name="value",
+                        new_value=data.value,
+                        meta={"key": tk.key, "key_id": key_id, "language": lang.code, "language_id": language_id})
 
-    # Auto-populate translation memory
+    # Glossary check
+    glossary_violations = []
+    source_translation = None
+    # Find a source text for glossary checking (any other language translation for this key)
     other_translations = db.query(Translation).join(Language, Translation.language_id == Language.id).filter(
         Translation.key_id == key_id,
         Translation.language_id != language_id,
     ).all()
+
     for other in other_translations:
         other_lang = db.query(Language).filter(Language.id == other.language_id).first()
         if other_lang:
+            violations = check_glossary(db, other.value, other_lang.code, data.value, lang.code)
+            glossary_violations.extend(violations)
+
+            # Auto-populate translation memory
             for src_l, src_t, tgt_l, tgt_t in [
                 (other_lang.code, other.value, lang.code, data.value),
                 (lang.code, data.value, other_lang.code, other.value),
@@ -194,18 +256,36 @@ def set_translation(
                         project_id=tk.project_id,
                     ))
 
+    # In strict mode, reject if glossary violations exist
+    if settings.glossary_strict and glossary_violations:
+        db.rollback()
+        raise HTTPException(422, detail={
+            "message": "Glossary violations detected",
+            "violations": [v.model_dump() for v in glossary_violations],
+        })
+
     db.commit()
     db.refresh(translation)
+
+    _dispatch_webhook(
+        "translation.updated" if old_value else "translation.created",
+        {"key_id": key_id, "key": tk.key, "language": lang.code, "value": data.value},
+        db,
+    )
+
     return translation
 
 
 @router.post("/api/projects/{project_id}/translations/bulk")
 def bulk_update_translations(
-    project_id: int, data: BulkTranslationRequest, db: Session = Depends(get_db)
+    project_id: int, data: BulkTranslationRequest,
+    request: Request, db: Session = Depends(get_db)
 ):
     _get_project_or_404(project_id, db)
     updated = 0
     created = 0
+    actor = get_current_user(request) or "anonymous"
+    from .revisions import record_revision
 
     for item in data.translations:
         tk = db.query(TranslationKey).filter(
@@ -227,12 +307,22 @@ def bulk_update_translations(
         ).first()
 
         if translation:
+            old_value = translation.value
             translation.value = item.value
             updated += 1
+            record_revision(db, project_id, "translation", translation.id, "update",
+                            actor=actor, field_name="value",
+                            old_value=old_value, new_value=item.value,
+                            meta={"key": tk.key, "language": item.language_code})
         else:
             translation = Translation(key_id=tk.id, language_id=lang.id, value=item.value)
             db.add(translation)
+            db.flush()
             created += 1
+            record_revision(db, project_id, "translation", translation.id, "create",
+                            actor=actor, field_name="value",
+                            new_value=item.value,
+                            meta={"key": tk.key, "language": item.language_code})
 
     db.commit()
     return {"updated": updated, "created": created}
@@ -242,7 +332,8 @@ def bulk_update_translations(
 
 @router.post("/api/projects/{project_id}/translations/find-replace", response_model=FindReplaceResponse)
 def find_replace(
-    project_id: int, data: FindReplaceRequest, db: Session = Depends(get_db)
+    project_id: int, data: FindReplaceRequest,
+    request: Request, db: Session = Depends(get_db)
 ):
     _get_project_or_404(project_id, db)
 
@@ -259,6 +350,7 @@ def find_replace(
 
     translations = query.all()
     matches = []
+    actor = get_current_user(request) or "anonymous"
 
     for t in translations:
         tk = db.query(TranslationKey).filter(TranslationKey.id == t.key_id).first()
@@ -274,6 +366,11 @@ def find_replace(
         ))
 
         if not data.preview:
+            from .revisions import record_revision
+            record_revision(db, project_id, "translation", t.id, "update",
+                            actor=actor, field_name="value",
+                            old_value=t.value, new_value=new_value,
+                            meta={"key": tk.key, "language": lang.code, "find_replace": True})
             t.value = new_value
 
     if not data.preview:

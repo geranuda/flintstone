@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Login - Flintstone{% endblock %}
+{% block content %}
+<article style="max-width: 400px; margin: 2rem auto;">
+    <header><h2>Login</h2></header>
+    {% if error %}
+    <div class="flash flash-error">{{ error }}</div>
+    {% endif %}
+    <form method="post" action="/login">
+        <label>
+            API Key
+            <input type="password" name="api_key" required placeholder="Enter your API key" autofocus>
+        </label>
+        <button type="submit">Login</button>
+    </form>
+</article>
+{% endblock %}

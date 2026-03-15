@@ -47,3 +47,10 @@ def client(db_session):
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+def _setup(client):
+    """Helper to create a project and languages for testing."""
+    client.post("/api/projects", json={"name": "Test Project"})
+    client.post("/api/languages", json={"code": "en", "name": "English"})
+    client.post("/api/languages", json={"code": "es", "name": "Spanish"})

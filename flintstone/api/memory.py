@@ -1,6 +1,7 @@
 """Translation Memory API endpoints."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -16,6 +17,8 @@ def suggest_translations(
     source_lang: str = Query(..., description="Source language code"),
     target_lang: str = Query(..., description="Target language code"),
     limit: int = Query(10, ge=1, le=50),
+    include_fuzzy: bool = Query(True, description="Include fuzzy matches"),
+    min_similarity: float = Query(0.6, ge=0.0, le=1.0, description="Minimum similarity for fuzzy"),
     db: Session = Depends(get_db),
 ):
     # Exact matches first
@@ -28,7 +31,7 @@ def suggest_translations(
     results = [
         TMSuggestion(
             source_text=tm.source_text, target_text=tm.target_text,
-            match_type="exact", project_id=tm.project_id,
+            match_type="exact", similarity_score=1.0, project_id=tm.project_id,
         )
         for tm in exact
     ]
@@ -47,10 +50,42 @@ def suggest_translations(
         results.extend([
             TMSuggestion(
                 source_text=tm.source_text, target_text=tm.target_text,
-                match_type="contains", project_id=tm.project_id,
+                match_type="contains", similarity_score=0.9, project_id=tm.project_id,
             )
             for tm in contains
         ])
+
+    # Fuzzy matches (if we still need more and fuzzy is enabled)
+    if include_fuzzy and len(results) < limit:
+        remaining = limit - len(results)
+        used_ids = [tm.id for tm in exact]
+        used_ids.extend([tm.id for tm in (contains if 'contains' in dir() else [])])
+
+        # Length pre-filter for performance
+        source_len = len(source)
+        max_diff = max(int(source_len * 0.3), 10)
+
+        candidates = db.query(TranslationMemory).filter(
+            TranslationMemory.source_lang == source_lang,
+            TranslationMemory.target_lang == target_lang,
+            sa_func.length(TranslationMemory.source_text).between(
+                source_len - max_diff, source_len + max_diff
+            ),
+        ).limit(5000).all()
+
+        # Filter out already matched
+        exact_texts = {r.target_text for r in results}
+        candidates = [c for c in candidates if c.target_text not in exact_texts]
+
+        from ..fuzzy import find_fuzzy_matches
+        fuzzy_matches = find_fuzzy_matches(source, candidates, min_similarity)
+
+        for tm, score in fuzzy_matches[:remaining]:
+            results.append(TMSuggestion(
+                source_text=tm.source_text, target_text=tm.target_text,
+                match_type="fuzzy", similarity_score=round(score, 3),
+                project_id=tm.project_id,
+            ))
 
     # Deduplicate by target_text
     seen = set()
@@ -131,18 +166,32 @@ def tm_fillup(
         total_missing += 1
 
         # Look up TM for a match
+        tm_match = None
         if data.match_type == "exact":
             tm_match = db.query(TranslationMemory).filter(
                 TranslationMemory.source_lang == data.source_lang,
                 TranslationMemory.target_lang == data.target_lang,
                 TranslationMemory.source_text == source_translation.value,
             ).first()
-        else:
+        elif data.match_type == "contains":
             tm_match = db.query(TranslationMemory).filter(
                 TranslationMemory.source_lang == data.source_lang,
                 TranslationMemory.target_lang == data.target_lang,
                 TranslationMemory.source_text.ilike(f"%{source_translation.value}%"),
             ).first()
+        elif data.match_type == "fuzzy":
+            # Fuzzy fill-up
+            candidates = db.query(TranslationMemory).filter(
+                TranslationMemory.source_lang == data.source_lang,
+                TranslationMemory.target_lang == data.target_lang,
+            ).limit(5000).all()
+
+            from ..fuzzy import find_fuzzy_matches
+            fuzzy_results = find_fuzzy_matches(
+                source_translation.value, candidates, data.min_similarity
+            )
+            if fuzzy_results:
+                tm_match = fuzzy_results[0][0]  # Best match
 
         if tm_match:
             new_translation = Translation(

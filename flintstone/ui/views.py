@@ -3,12 +3,15 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..auth import _sign_key, get_current_user, require_auth, verify_key
+from ..config import settings
 from ..database import get_db
-from ..models import Language, Project, Translation, TranslationKey
+from ..models import GlossaryTerm, GlossaryTranslation, Language, Project, Revision, Translation, TranslationKey
 
 BASE_DIR = Path(__file__).parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -34,8 +37,44 @@ def _get_project_tags(project_id: int, db: Session) -> list[dict]:
     return [{"tag": t, "count": c} for t, c in sorted(tag_counts.items())]
 
 
+# --- Auth routes (no auth dependency) ---
+
+@router.get("/login")
+def login_page(request: Request):
+    if not settings.auth_keys:
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@router.post("/login")
+async def login_submit(request: Request):
+    form = await request.form()
+    api_key = form.get("api_key", "")
+    if not verify_key(api_key):
+        return templates.TemplateResponse("login.html", {
+            "request": request, "error": "Invalid API key"
+        })
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=_sign_key(api_key),
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@router.get("/logout")
+def logout(request: Request):
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(settings.auth_cookie_name)
+    return response
+
+
+# --- Protected UI routes ---
+
 @router.get("/")
-def dashboard(request: Request, db: Session = Depends(get_db)):
+def dashboard(request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
     projects = db.query(Project).order_by(Project.name).all()
     languages = db.query(Language).order_by(Language.code).all()
     project_data = []
@@ -59,11 +98,12 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         "request": request,
         "projects": project_data,
         "languages": languages,
+        "auth_enabled": bool(settings.auth_keys),
     })
 
 
 @router.get("/projects/{project_id}")
-def project_detail(project_id: int, request: Request, db: Session = Depends(get_db)):
+def project_detail(project_id: int, request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         return templates.TemplateResponse("dashboard.html", {
@@ -103,6 +143,7 @@ def translation_editor(
     q: str = "",
     tag: str = "",
     db: Session = Depends(get_db),
+    _=Depends(require_auth),
 ):
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -144,11 +185,45 @@ def translation_editor(
 
 
 @router.get("/projects/{project_id}/import-export")
-def import_export_page(project_id: int, request: Request, db: Session = Depends(get_db)):
+def import_export_page(project_id: int, request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
     project = db.query(Project).filter(Project.id == project_id).first()
     languages = db.query(Language).order_by(Language.code).all()
     return templates.TemplateResponse("import_export.html", {
         "request": request,
         "project": project,
+        "languages": languages,
+    })
+
+
+# --- New UI pages ---
+
+@router.get("/projects/{project_id}/history")
+def revision_history(project_id: int, request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        return RedirectResponse("/", status_code=303)
+    revisions = db.query(Revision).filter(
+        Revision.project_id == project_id
+    ).order_by(Revision.created_at.desc()).limit(100).all()
+    return templates.TemplateResponse("revisions.html", {
+        "request": request,
+        "project": project,
+        "revisions": revisions,
+    })
+
+
+@router.get("/glossary")
+def glossary_page(request: Request, db: Session = Depends(get_db), _=Depends(require_auth)):
+    terms = db.query(GlossaryTerm).order_by(GlossaryTerm.source_term).all()
+    languages = db.query(Language).order_by(Language.code).all()
+    term_data = []
+    for term in terms:
+        translations = {}
+        for gt in db.query(GlossaryTranslation).filter(GlossaryTranslation.term_id == term.id).all():
+            translations[gt.language_code] = gt.approved_value
+        term_data.append({"term": term, "translations": translations})
+    return templates.TemplateResponse("glossary.html", {
+        "request": request,
+        "terms": term_data,
         "languages": languages,
     })

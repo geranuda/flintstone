@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Glossary - Flintstone{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>Glossary</h2>
+    <p>Manage approved terminology for consistent translations across projects.</p>
+</hgroup>
+
+<!-- Add Term -->
+<details>
+    <summary role="button" class="outline">Add Glossary Term</summary>
+    <form id="add-term-form" onsubmit="return addTerm(event)">
+        <div class="grid">
+            <label>
+                Source Term
+                <input type="text" name="source_term" required placeholder="e.g. Save">
+            </label>
+            <label>
+                Source Language
+                <select name="source_language" required>
+                    {% for lang in languages %}
+                    <option value="{{ lang.code }}" {% if lang.code == 'en' %}selected{% endif %}>{{ lang.code }} — {{ lang.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                Description
+                <input type="text" name="description" placeholder="Optional context">
+            </label>
+        </div>
+        <button type="submit">Add Term</button>
+    </form>
+</details>
+
+<!-- Terms List -->
+{% if terms %}
+<table>
+    <thead>
+        <tr>
+            <th>Source Term</th>
+            <th>Language</th>
+            <th>Description</th>
+            <th>Approved Translations</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in terms %}
+        <tr>
+            <td><strong>{{ item.term.source_term }}</strong></td>
+            <td>{{ item.term.source_language }}</td>
+            <td>{{ item.term.description or '' }}</td>
+            <td>
+                {% for lang_code, value in item.translations.items() %}
+                <small><strong>{{ lang_code }}:</strong> {{ value }}</small><br>
+                {% endfor %}
+            </td>
+            <td>
+                <button class="btn-sm outline secondary" onclick="deleteTerm({{ item.term.id }})">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No glossary terms defined yet. Add terms above to enforce consistent terminology.</p>
+{% endif %}
+
+<script>
+async function addTerm(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        source_term: form.source_term.value,
+        source_language: form.source_language.value,
+        description: form.description.value,
+    };
+    const res = await fetch('/api/glossary', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+    });
+    if (res.ok) { location.reload(); }
+    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    return false;
+}
+
+async function deleteTerm(termId) {
+    if (!confirm('Delete this glossary term?')) return;
+    await fetch(`/api/glossary/${termId}`, { method: 'DELETE' });
+    location.reload();
+}
+</script>
+{% endblock %}

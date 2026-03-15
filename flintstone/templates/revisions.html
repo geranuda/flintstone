@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}History - {{ project.name }} - Flintstone{% endblock %}
+{% block extra_head %}
+<style>
+    .revision-row { border-bottom: 1px solid var(--pico-muted-border-color); padding: 0.5rem 0; }
+    .rev-meta { font-size: 0.8rem; color: var(--pico-muted-color); }
+    .rev-old { background: #fdd; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+    .rev-new { background: #dfd; padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
+    .rev-action { font-weight: bold; }
+</style>
+{% endblock %}
+{% block content %}
+<hgroup>
+    <h2>{{ project.name }} — Revision History</h2>
+    <p><a href="/projects/{{ project.id }}">Back to project</a></p>
+</hgroup>
+
+{% if revisions %}
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Actor</th>
+            <th>Type</th>
+            <th>Action</th>
+            <th>Field</th>
+            <th>Old Value</th>
+            <th>New Value</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for rev in revisions %}
+        <tr class="revision-row">
+            <td class="rev-meta">{{ rev.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ rev.actor }}</td>
+            <td>{{ rev.entity_type }}</td>
+            <td class="rev-action">{{ rev.action }}</td>
+            <td>{{ rev.field_name or '' }}</td>
+            <td>{% if rev.old_value %}<span class="rev-old">{{ rev.old_value[:100] }}</span>{% endif %}</td>
+            <td>{% if rev.new_value %}<span class="rev-new">{{ rev.new_value[:100] }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No revisions recorded yet. Changes will appear here as you edit translations, keys, and project settings.</p>
+{% endif %}
+{% endblock %}

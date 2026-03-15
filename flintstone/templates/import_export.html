@@ -27,6 +27,26 @@
         <a href="/api/projects/{{ project.id }}/export?format=csv"
            role="button" class="outline" download>Download CSV</a>
 
+        <h4>PO (gettext)</h4>
+        {% if languages %}
+        <div class="actions" style="flex-wrap: wrap; margin-bottom: 1rem;">
+            {% for lang in languages %}
+            <a href="/api/projects/{{ project.id }}/export?format=po&lang={{ lang.code }}"
+               role="button" class="outline btn-sm" download>{{ lang.code }}.po</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <h4>XLIFF</h4>
+        {% if languages %}
+        <div class="actions" style="flex-wrap: wrap; margin-bottom: 1rem;">
+            {% for lang in languages %}
+            <a href="/api/projects/{{ project.id }}/export?format=xliff&lang={{ lang.code }}"
+               role="button" class="outline btn-sm" download>{{ lang.code }}.xliff</a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <h4>TMX (Translation Memory eXchange)</h4>
         <a href="/api/projects/{{ project.id }}/export/tmx"
            role="button" class="outline" download>Download TMX</a>
@@ -60,6 +80,32 @@
                 <input type="file" name="file" accept=".csv" required>
             </label>
             <button type="submit" class="secondary">Import CSV</button>
+        </form>
+
+        <h4>PO file</h4>
+        <form id="import-po-form" onsubmit="return importFile(event, 'po')">
+            <label>
+                Language
+                <select name="lang" required>
+                    {% for lang in languages %}
+                    <option value="{{ lang.code }}">{{ lang.code }} — {{ lang.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>
+                File
+                <input type="file" name="file" accept=".po" required>
+            </label>
+            <button type="submit">Import PO</button>
+        </form>
+
+        <h4>XLIFF file</h4>
+        <form id="import-xliff-form" onsubmit="return importFile(event, 'xliff')">
+            <label>
+                File
+                <input type="file" name="file" accept=".xliff,.xlf" required>
+            </label>
+            <button type="submit" class="secondary">Import XLIFF</button>
         </form>
 
         <h4>TMX file</h4>
