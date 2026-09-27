@@ -269,3 +269,26 @@ def test_icu_helpers():
     assert icu.parse_plural("{cnt, plural, one {x}}") is None  # "other" is required
     assert icu.kind("<cds-root><cds-unit id=\"device.mac\">Mac</cds-unit></cds-root>") == "variations"
     assert icu.display_length("{cnt, plural, one {ab} other {abcd}}") == 4
+
+
+def test_empty_units_are_not_written_back():
+    value = icu.build_units([("device.iphone", "Toca"), ("device.mac", "")])
+    assert catalogs.xcstrings_localization(value) == {"variations": {"device": {"iphone": _unit("Toca")}}}
+
+
+def test_stringsdict_wins_over_strings_for_the_same_table(tmp_path):
+    lproj = tmp_path / "en.lproj"
+    lproj.mkdir()
+    (lproj / "Localizable.strings").write_text('"%d files" = "%d files";\n"title" = "Files";\n', encoding="utf-8")
+    with open(lproj / "Localizable.stringsdict", "wb") as fh:
+        plistlib.dump({"%d files": {
+            "NSStringLocalizedFormatKey": "%#@files@",
+            "files": {"NSStringFormatSpecTypeKey": "NSStringPluralRuleType", "one": "%d file", "other": "%d files"},
+        }}, fh)
+    root, files = catalogs.discover(tmp_path)
+    loaded = catalogs.load(files, root)
+    for order in (loaded, list(reversed(loaded))):
+        merged, warnings = catalogs.consolidate(order)
+        assert merged["%d files"].string == "{cnt, plural, one {%d file} other {%d files}}"
+        assert merged["title"].string == "Files"
+        assert warnings == []

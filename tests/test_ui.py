@@ -72,3 +72,33 @@ def test_filters():
     assert short_file("Localizable.xcstrings") == "Localizable.xcstrings"
     assert "␣" in str(highlight_placeholders(" ")) and "␣" in str(show_key(" "))
     assert str(show_key("a<b")) == "a&lt;b"
+
+
+def test_variation_units_follow_target_plural_rules(client, native_project):
+    source = ('<cds-root><cds-unit id="substitutions">Found %1$#@users@</cds-unit>'
+              '<cds-unit id="substitutions.users.plural.one">%1$ld user</cds-unit>'
+              '<cds-unit id="substitutions.users.plural.other">%1$ld users</cds-unit></cds-root>')
+    client.post(f"/api/projects/{native_project.id}/languages", json={"code": "ru"})
+    client.post("/cds/content", headers=native_project.write, json={"data": {"found": {"string": source}}})
+    ru = ('<cds-root><cds-unit id="substitutions">Найдено %1$#@users@</cds-unit>'
+          '<cds-unit id="substitutions.users.plural.few">%1$ld пользователя</cds-unit>'
+          '<cds-unit id="device.watch">только часы</cds-unit></cds-root>')
+    client.post("/cds/content/ru", headers=native_project.write, json={"data": {"found": ru}})
+
+    html = client.get(f"/projects/{native_project.id}/translate?lang=ru").text
+    # Russian needs one/few/many/other even though the English source only has one/other,
+    # and units that only the translation has are kept so saving cannot drop them.
+    for uid in ("substitutions", "substitutions.users.plural.one", "substitutions.users.plural.few",
+                "substitutions.users.plural.many", "substitutions.users.plural.other", "device.watch"):
+        assert f'data-unit="{uid}"' in html
+    assert ">users · few<" in html and ">phrase<" in html
+    assert "только часы" in html
+
+
+def test_translation_not_split_into_forms_is_shown(client, native_project):
+    client.post("/cds/content", headers=native_project.write, json={"data": {
+        "n": {"string": "{cnt, plural, one {%d item} other {%d items}}"},
+    }})
+    client.post("/cds/content/fr", headers=native_project.write, json={"data": {"n": "%d éléments"}})
+    html = client.get(f"/projects/{native_project.id}/translate?lang=fr").text
+    assert "not split into plural forms" in html and "éléments" in html

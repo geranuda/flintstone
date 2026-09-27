@@ -128,8 +128,8 @@
                 {% endfor %}
             {% elif row.kind == 'variations' %}
                 <span class="badge variations">variations</span>
-                {% for uid, text in row.source_units %}
-                <div class="plural-form source-text"><span class="form-label">{{ uid }}</span> {{ text|ph }}</div>
+                {% for uid, label, text in row.source_units %}
+                <div class="plural-form source-text"><span class="form-label" title="{{ uid }}">{{ label }}</span> {{ text|ph }}</div>
                 {% endfor %}
             {% else %}
                 <div class="source-text" data-source-text="{{ row.source }}">{{ row.source|ph }}</div>
@@ -143,6 +143,12 @@
             </div>
         </div>
         <div class="string-target" style="position:relative">
+            {% if row.mismatch %}
+            <div class="mismatch" title="Filling the fields below replaces it">
+                Current translation, not split into {{ 'plural forms' if row.kind == 'plural' else 'variations' }}:
+                <span class="source-text">{{ row.value|ph }}</span>
+            </div>
+            {% endif %}
             {% if row.kind == 'plural' %}
                 {% for form, text in row.forms %}
                 <div class="plural-input">
@@ -152,10 +158,11 @@
                 </div>
                 {% endfor %}
             {% elif row.kind == 'variations' %}
-                {% for uid, text in row.units %}
+                {% for uid, label, text, optional in row.units %}
                 <div class="plural-input">
-                    <span class="form-label" title="{{ uid }}">{{ uid.split('.')[-1] }}</span>
-                    <textarea rows="1" data-unit="{{ uid }}" dir="{{ 'rtl' if target_info.rtl else 'auto' }}">{{ text }}</textarea>
+                    <span class="form-label" title="{{ uid }}">{{ label }}</span>
+                    <textarea rows="1" data-unit="{{ uid }}" dir="{{ 'rtl' if target_info.rtl else 'auto' }}"
+                              {% if optional %}placeholder="Optional: large round numbers (1,000,000)"{% endif %}>{{ text }}</textarea>
                 </div>
                 {% endfor %}
             {% else %}

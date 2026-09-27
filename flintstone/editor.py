@@ -1,9 +1,10 @@
 """Queries and view models behind the translation editor (web UI and API)."""
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, aliased
 
 from . import icu, locales
@@ -17,6 +18,7 @@ STATUS_FILTERS = {
 }
 SORTS = {"key": "Key", "source": "Source text", "recent": "Recently updated"}
 STATUS_LABELS = {"untranslated": "Untranslated", "translated": "Translated", "reviewed": "Reviewed", "proofread": "Proofread"}
+_PLURAL_UNIT = re.compile(r"^(?P<prefix>.+)\.plural\.(?P<category>zero|one|two|few|many|other)$")
 
 
 @dataclass
@@ -49,10 +51,11 @@ def _filtered(db: Session, project: Project, target: Language, source: Language 
             tgt.value.ilike(pattern, escape="\\"),
             TranslationKey.description.ilike(pattern, escape="\\"),
         ))
+    # Exact, case-sensitive matches against the comma / newline separated lists
     if tag:
-        query = query.filter(("," + TranslationKey.tags + ",").like(_like(f",{tag},"), escape="\\"))
+        query = query.filter(func.instr("," + TranslationKey.tags + ",", f",{tag},") > 0)
     if file:
-        query = query.filter(TranslationKey.occurrences.like(_like(file), escape="\\"))
+        query = query.filter(func.instr("\n" + TranslationKey.occurrences + "\n", f"\n{file}\n") > 0)
     return query, src, tgt
 
 
@@ -113,6 +116,41 @@ def project_files(db: Session, project: Project) -> list[tuple[str, int]]:
     return sorted(counts.items())
 
 
+def unit_label(uid: str) -> str:
+    """``substitutions.users.plural.one`` -> ``users · one``; ``device.iphone`` -> ``iphone``."""
+    if uid == "substitutions":
+        return "phrase"
+    parts = uid.split(".")
+    if parts[0] in ("substitutions", "device"):
+        parts = parts[1:]
+    return " · ".join(p for p in parts if p != "plural") or uid
+
+
+def unit_ids(source_units: list[tuple[str, str]], target_units: dict[str, str], target_code: str) -> list[str]:
+    """Editable unit ids for a translation of a ``<cds-root>`` string.
+
+    Starts from the source units, gives every plural group the categories the
+    target language needs (Russian adds ``few``/``many`` to English ``one``/
+    ``other``), and keeps units that only the existing translation has.
+    """
+    categories = set(locales.plural_categories(target_code))
+    groups: dict[str, set[str]] = {}
+    for uid in [u for u, _ in source_units] + list(target_units):
+        match = _PLURAL_UNIT.match(uid)
+        if match:
+            groups.setdefault(match["prefix"], set()).add(match["category"])
+    ids: list[str] = []
+    for uid, _ in source_units:
+        match = _PLURAL_UNIT.match(uid)
+        wanted = [uid]
+        if match:
+            present = groups[match["prefix"]] | categories
+            wanted = [f"{match['prefix']}.plural.{c}" for c in locales.PLURAL_ORDER if c in present]
+        ids.extend(u for u in wanted if u not in ids)
+    ids.extend(u for u in target_units if u not in ids)
+    return ids
+
+
 def row_view(row: StringRow, target: Language) -> dict:
     """Everything a template needs to render one editable string."""
     tk = row.key
@@ -139,10 +177,21 @@ def row_view(row: StringRow, target: Language) -> dict:
         view["source_forms"] = icu.order_forms(source_plural.forms)
         view["forms"] = [(k, target_forms.get(k, "")) for k, _ in icu.order_forms(dict.fromkeys(wanted, ""))]
         view["optional_forms"] = set(locales.optional_categories(target.code))
+        # A translation that is not split into forms (e.g. made before the source became a plural)
+        view["mismatch"] = bool(value) and target_plural is None
     elif view["kind"] == "variations":
-        target_units = dict(icu.parse_units(value) or [])
-        view["source_units"] = icu.parse_units(source)
-        view["units"] = [(uid, target_units.get(uid, "")) for uid, _ in view["source_units"]]
+        source_units = icu.parse_units(source) or []
+        parsed = icu.parse_units(value)
+        target_units = dict(parsed or [])
+        optional = set(locales.optional_categories(target.code))
+        view["source_units"] = [(uid, unit_label(uid), text) for uid, text in source_units]
+        view["units"] = []
+        for uid in unit_ids(source_units, target_units, target.code):
+            match = _PLURAL_UNIT.match(uid)
+            view["units"].append(
+                (uid, unit_label(uid), target_units.get(uid, ""), bool(match and match["category"] in optional))
+            )
+        view["mismatch"] = bool(value) and parsed is None
     return view
 
 

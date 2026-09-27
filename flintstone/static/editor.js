@@ -36,8 +36,17 @@
         }
         if (kind === 'variations') {
             const units = [...row.querySelectorAll('textarea[data-unit]')];
-            if (!units.some(a => a.value !== '')) return '';
-            return '<cds-root>' + units.map(a =>
+            const filled = units.filter(a => a.value !== '');
+            if (!filled.length) return '';
+            const value = id => (units.find(a => a.dataset.unit === id) || {}).value;
+            // A substitution needs its phrase, and every plural group its "other" form.
+            if (value('substitutions') === '') return null;
+            for (const a of filled) {
+                const group = a.dataset.unit.match(/^(.*)\.plural\.[a-z]+$/);
+                if (group && !value(`${group[1]}.plural.other`)) return null;
+            }
+            // Empty units are left out so SDKs fall back instead of showing blank text.
+            return '<cds-root>' + filled.map(a =>
                 `<cds-unit id="${escapeXml(a.dataset.unit).replace(/"/g, '&quot;')}">${escapeXml(a.value)}</cds-unit>`
             ).join('') + '</cds-root>';
         }
@@ -70,10 +79,21 @@
         counter.classList.toggle('over', length > limit);
     }
 
+    // Saves and review changes for a row run one after another, so a review
+    // clicked right after an edit is applied after the edit (which resets it).
+    function enqueue(row, operation) {
+        row._queue = (row._queue || Promise.resolve()).then(operation).catch(err => {
+            console.error(err);
+            setState(row, 'err', 'Error');
+        });
+        return row._queue;
+    }
+
     async function save(row) {
         const value = buildValue(row);
         if (value === null) {
-            setState(row, 'err', 'Fill "other"');
+            const missingPhrase = row.querySelector('textarea[data-unit="substitutions"]')?.value === '';
+            setState(row, 'err', missingPhrase ? 'Fill the phrase' : 'Fill "other"');
             return;
         }
         if (value === row.dataset.saved) return;
@@ -102,8 +122,8 @@
         setState(row, 'ok', 'Saved');
     }
 
-    async function toggleReview(row, button) {
-        const status = button.classList.contains('on') ? 'translated' : 'reviewed';
+    async function setReview(row, status) {
+        if (row.dataset.status === 'untranslated') return;
         const res = await fetch(`/api/translations/${row.dataset.keyId}/${targetId}/status`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status })
         });
@@ -148,7 +168,7 @@
                     autosize(area);
                     updateCount(row);
                     hideSuggestions();
-                    save(row);
+                    enqueue(row, () => save(row));
                 });
                 dropdown.appendChild(item);
             }
@@ -172,7 +192,7 @@
 
     list.addEventListener('change', e => {
         const row = e.target.closest('.string-row');
-        if (row && e.target.tagName === 'TEXTAREA') save(row);
+        if (row && e.target.tagName === 'TEXTAREA') enqueue(row, () => save(row));
     });
 
     list.addEventListener('focusin', e => {
@@ -186,7 +206,10 @@
 
     list.addEventListener('click', e => {
         const button = e.target.closest('[data-review]');
-        if (button) toggleReview(button.closest('.string-row'), button);
+        if (!button) return;
+        const row = button.closest('.string-row');
+        const status = button.classList.contains('on') ? 'translated' : 'reviewed';
+        enqueue(row, () => setReview(row, status));
     });
 
     // Cmd/Ctrl+Enter: save and jump to the next string
@@ -194,7 +217,7 @@
         if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey) || e.target.tagName !== 'TEXTAREA') return;
         e.preventDefault();
         const row = e.target.closest('.string-row');
-        save(row);
+        enqueue(row, () => save(row));
         const next = row.nextElementSibling?.querySelector('textarea');
         if (next) next.focus();
     });

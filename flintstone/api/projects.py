@@ -143,10 +143,14 @@ def remove_project_language(project_id: int, code: str, db: Session = Depends(ge
 # --- Native credentials and push history ---
 
 @router.post("/{project_id}/credentials", response_model=CredentialsResponse)
-def rotate_credentials(project_id: int, data: CredentialsRotate | None = None, db: Session = Depends(get_db)):
-    """Generate a new secret (default), token, or both. The secret is returned once."""
+def rotate_credentials(project_id: int, data: CredentialsRotate, db: Session = Depends(get_db)):
+    """Generate a new secret, token, or both. The secret is returned once.
+
+    The JSON body is required: browsers cannot send it cross-site without a
+    CORS preflight, which keeps other websites from rotating credentials.
+    """
     project = _get_project_or_404(project_id, db)
-    rotate = data.rotate if data else "secret"
+    rotate = data.rotate
     secret = None
     if rotate in ("token", "all"):
         native.issue_token(project)

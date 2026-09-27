@@ -161,6 +161,17 @@ def consolidate(catalogs: list[Catalog]) -> tuple[dict[str, SourceString], list[
             for occurrence in s.occurrences:
                 if occurrence not in current.occurrences:
                     current.occurrences.append(occurrence)
+            if _same_table(current.origin, s.origin):
+                # iOS resolves a key from Table.stringsdict before Table.strings
+                if s.origin.endswith(".stringsdict") and current.origin.endswith(".strings"):
+                    current.string, current.origin = s.string, s.origin
+                    current.translations = {**current.translations, **s.translations}
+                elif s.origin.endswith(".strings") and current.origin.endswith(".stringsdict"):
+                    for lang, value in s.translations.items():
+                        current.translations.setdefault(lang, value)
+                if not current.developer_comment and s.developer_comment:
+                    current.developer_comment = s.developer_comment
+                continue
             if current.string != s.string:
                 warnings.append((s.key, (
                     f"{s.key!r}: source differs in {s.origin} ({_short(s.string)}); "
@@ -172,6 +183,11 @@ def consolidate(catalogs: list[Catalog]) -> tuple[dict[str, SourceString], list[
             for lang, value in s.translations.items():
                 current.translations.setdefault(lang, value)
     return merged, warnings
+
+
+def _same_table(a: str, b: str) -> bool:
+    """``en.lproj/Localizable.strings`` and ``en.lproj/Localizable.stringsdict``."""
+    return a != b and a.rsplit(".", 1)[0] == b.rsplit(".", 1)[0]
 
 
 def _short(text: str, limit: int = 40) -> str:
@@ -314,6 +330,8 @@ def xcstrings_localization(value: str, source_loc: dict | None = None) -> dict:
     source_main = ((source_loc or {}).get("stringUnit") or {}).get("value", "")
     loc: dict = {}
     for uid, text in units:
+        if not text:
+            continue  # an empty "translated" unit would show blank text in the app
         parts = uid.split(".")
         if parts[0] == "substitutions" and len(parts) == 1:
             if not re.search(r"%\d+\$#@", source_main):

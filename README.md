@@ -233,7 +233,7 @@ pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
-113 tests covering the CDS protocol, push and pull semantics, String Catalog, `.strings`, `.stringsdict`, XLIFF and JSON parsing and write-back, the CLI, database upgrades, the web UI, import/export round-trips, translation memory, find & replace, tagging, and TM fill-up.
+118 tests covering the CDS protocol, push and pull semantics, String Catalog, `.strings`, `.stringsdict`, XLIFF and JSON parsing and write-back, the CLI, database upgrades, the web UI, import/export round-trips, translation memory, find & replace, tagging, and TM fill-up.
 
 ---
 

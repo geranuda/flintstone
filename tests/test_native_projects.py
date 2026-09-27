@@ -93,6 +93,7 @@ def test_strings_endpoint_filters(client, native_project):
         "discount": {"string": "50% off", "meta": {"occurrences": ["Watch/Localizable.xcstrings"],
                                                    "developer_comment": "Sale badge"}},
         "hello": {"string": "Hello", "meta": {"occurrences": ["App/Localizable.xcstrings"]}},
+        "mine": {"string": "Mine", "meta": {"occurrences": ["MyApp/Localizable.xcstrings"], "tags": ["UI"]}},
     })
     client.post("/cds/content/es-MX", headers=native_project.write,
                 json={"data": {"hello": {"string": "Hola", "status": "reviewed"}, "discount": "50% menos"}})
@@ -101,18 +102,20 @@ def test_strings_endpoint_filters(client, native_project):
     def keys(**params):
         return [s["key"] for s in client.get(url, params={"lang": "es-MX", **params}).json()["strings"]]
 
-    assert keys() == ["count", "discount", "hello"]
+    assert keys() == ["count", "discount", "hello", "mine"]
     assert keys(q="0%") == ["discount"]  # LIKE wildcards are literal
     assert keys(q="_") == []
     assert keys(q="sale") == ["discount"]  # developer comments are searchable
     assert keys(q="hola") == ["hello"]  # so are translations
-    assert keys(tag="ui") == ["count"]
-    assert keys(file="Watch/") == ["discount"]
-    assert keys(status="untranslated") == ["count"]
+    assert keys(tag="ui") == ["count"]  # exact and case-sensitive
+    assert keys(file="Watch/Localizable.xcstrings") == ["discount"]
+    assert keys(file="App/Localizable.xcstrings") == ["count", "hello"]  # not MyApp/…
+    assert keys(file="Watch/") == []
+    assert keys(status="untranslated") == ["count", "mine"]
     assert keys(status="unreviewed") == ["discount"]
     assert keys(status="reviewed") == ["hello"]
-    page = client.get(url, params={"lang": "es-MX", "per_page": 2, "page": 2}).json()
-    assert page["total"] == 3 and [s["key"] for s in page["strings"]] == ["hello"]
+    page = client.get(url, params={"lang": "es-MX", "per_page": 3, "page": 2}).json()
+    assert page["total"] == 4 and [s["key"] for s in page["strings"]] == ["mine"]
     count = client.get(url, params={"lang": "es-MX", "q": "item"}).json()["strings"][0]
     assert count["kind"] == "plural" and count["tags"] == ["ui"]
     assert client.get(url, params={"lang": "de"}).status_code == 404
@@ -133,3 +136,12 @@ def test_key_metadata_via_api(client, native_project):
     assert key["tags"] == ["ui", "a b"] and key["character_limit"] == 12 and key["context"] == "settings"
     res = client.put(f"/api/keys/{key['id']}", json={"character_limit": 0, "occurrences": []})
     assert res.json()["character_limit"] is None and res.json()["occurrences"] == []
+
+
+def test_credentials_rotation_needs_a_json_body(client, native_project):
+    # A cross-site form or text/plain POST must not be able to rotate the secret
+    url = f"/api/projects/{native_project.id}/credentials"
+    assert client.post(url).status_code == 422
+    res = client.post(url, content=b'{"rotate": "secret"}', headers={"Content-Type": "text/plain"})
+    assert res.status_code == 422
+    assert client.post("/cds/invalidate", headers=native_project.write).status_code == 200
