@@ -1,87 +1,293 @@
 {% extends "base.html" %}
 {% block title %}{{ project.name }} - Flintstone{% endblock %}
-{% block extra_head %}
-<style>
-    .tag { display: inline-block; padding: 0.15rem 0.5rem; margin: 0.15rem;
-           border-radius: 0.75rem; font-size: 0.8rem;
-           background: var(--pico-secondary-background); color: var(--pico-secondary-inverse); }
-    .tag-count { font-size: 0.7rem; opacity: 0.7; margin-left: 0.25rem; }
-</style>
-{% endblock %}
 {% block content %}
-<hgroup>
-    <h2>{{ project.name }}</h2>
-    <p>{{ project.description or "No description" }} &mdash; {{ key_count }} keys</p>
-</hgroup>
-
-<div class="grid">
-    <a href="/projects/{{ project.id }}/translate" role="button">Translation Editor</a>
-    <a href="/projects/{{ project.id }}/import-export" role="button" class="secondary">Import / Export</a>
-    <a href="/" role="button" class="outline">Back to Dashboard</a>
+<div class="crumbs"><a href="/">Projects</a> / {{ project.name }}</div>
+<div class="page-head">
+    <div>
+        <h1>{{ project.name }}</h1>
+        <p>{{ project.description or "No description" }}</p>
+    </div>
+    <div class="actions">
+        <a href="/projects/{{ project.id }}/translate" role="button" class="btn-sm">Open editor</a>
+        <a href="/projects/{{ project.id }}/import-export" role="button" class="btn-sm outline secondary">Import / Export</a>
+    </div>
 </div>
 
-<!-- Add Key Form -->
-<details open>
-    <summary role="button" class="outline">Add Translation Key</summary>
-    <form id="add-key-form" onsubmit="return addKey(event)">
-        <div class="grid">
-            <label>
-                Key
-                <input type="text" name="key" required placeholder="common.save_button">
-            </label>
-            <label>
-                Description
-                <input type="text" name="description" placeholder="Save button label">
-            </label>
-            <label>
-                Tags
-                <input type="text" name="tags" placeholder="ui, buttons (comma-separated)">
-            </label>
+<!-- Languages -->
+<div class="card-grid">
+    <article class="card language-card">
+        <div class="row spread">
+            <strong>{{ source_info.name }}</strong>
+            <span class="badge source">source</span>
         </div>
-        <button type="submit">Add Key</button>
-    </form>
-</details>
-
-<!-- Tags -->
-{% if tags %}
-<h3>Tags</h3>
-<div style="margin-bottom: 1rem;">
-    {% for t in tags %}
-    <a href="/projects/{{ project.id }}/translate?tag={{ t.tag }}" class="tag">
-        {{ t.tag }}<span class="tag-count">{{ t.count }}</span>
-    </a>
-    {% endfor %}
-</div>
-{% endif %}
-
-<!-- Language Stats -->
-<h3>Translation Progress</h3>
-{% if stats %}
-<div class="stats-grid">
-    {% for s in stats %}
-    <article class="stat-card">
-        <h4>{{ s.language.name }} ({{ s.language.code }})</h4>
-        <progress value="{{ s.translated }}" max="{{ s.total }}"></progress>
-        <p>{{ s.translated }} / {{ s.total }} ({{ s.percentage }}%)</p>
+        <div class="native-name">{{ source_info.localized_name }} · <span class="mono">{{ project.source_language_code }}</span></div>
+        <div style="margin-top:0.8rem" class="big-number">{{ key_count|num }}</div>
+        <div class="small muted">source strings{% if files %} in {{ files|length }} file{{ '' if files|length == 1 else 's' }}{% endif %}</div>
+    </article>
+    {% for s in targets %}
+    <article class="card language-card">
+        <button class="icon-button remove" title="Remove {{ s.language.code }} from this project" data-code="{{ s.language.code }}" onclick="removeLanguage(this.dataset.code)">×</button>
+        <strong>{{ s.language.name }}</strong>
+        <div class="native-name"><span class="mono">{{ s.language.code }}</span></div>
+        <div class="row" style="margin-top:0.8rem; align-items:baseline">
+            <span class="big-number">{{ s.percentage|round(1) }}%</span>
+            <span class="small muted">translated</span>
+        </div>
+        <div class="progress" style="margin-top:0.4rem">
+            <span class="translated" style="width: {{ s.percentage }}%"></span>
+            <span class="reviewed" style="width: {{ s.reviewed_percentage }}%"></span>
+        </div>
+        <div class="progress-legend">
+            <span><span class="status translated">{{ s.translated|num }} translated</span></span>
+            <span><span class="status reviewed">{{ s.reviewed|num }} reviewed</span></span>
+        </div>
+        <div class="actions" style="margin-top:0.75rem">
+            <a href="/projects/{{ project.id }}/translate?lang={{ s.language.code }}" role="button" class="btn-sm outline">Translate</a>
+            {% if s.translated < s.total %}
+            <a href="/projects/{{ project.id }}/translate?lang={{ s.language.code }}&status=untranslated" class="small">{{ (s.total - s.translated)|num }} untranslated</a>
+            {% endif %}
+        </div>
     </article>
     {% endfor %}
+    <article class="card">
+        <strong>Add a language</strong>
+        <form onsubmit="return addLanguage(event)" style="margin-top:0.6rem">
+            <select name="code" required>
+                <option value="" disabled selected>Choose…</option>
+                {% for info in catalog %}
+                <option value="{{ info.code }}">{{ info.name }} — {{ info.code }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn-sm outline">Add target language</button>
+        </form>
+    </article>
 </div>
-{% else %}
-<p>No languages configured. <a href="/">Add languages from the dashboard</a>.</p>
-{% endif %}
 
+<div class="split">
+    <!-- Native SDK / CDS -->
+    <section class="card">
+        <div class="row spread">
+            <h3 style="margin:0">Transifex Native SDK</h3>
+            <span class="badge native">CDS compatible</span>
+        </div>
+        <p class="small muted" style="margin:0.4rem 0 0.9rem">
+            Official Transifex Native SDKs and CLIs work with Flintstone: set their CDS host to the URL below and use this project's token.
+        </p>
+        <dl class="kv">
+            <dt>CDS host</dt>
+            <dd class="copyable"><code id="cds-host">{{ cds_host }}</code><button class="copy-btn outline secondary" data-copy="#cds-host">Copy</button></dd>
+            <dt>Token</dt>
+            <dd class="copyable"><code id="token">{{ project.token }}</code><button class="copy-btn outline secondary" data-copy="#token">Copy</button></dd>
+            <dt>Secret</dt>
+            <dd class="row">
+                <code>{% if project.secret_hint %}••••••••{{ project.secret_hint }}{% else %}not generated{% endif %}</code>
+                <button class="copy-btn outline" onclick="rotateSecret()">Generate new secret</button>
+            </dd>
+        </dl>
+        <div id="secret-box"></div>
+
+        <div class="tabs" style="margin-top:1.1rem" role="tablist">
+            <button class="active" data-tab="tab-ios">iOS (Swift)</button>
+            <button data-tab="tab-cli">CLI</button>
+            <button data-tab="tab-js">JavaScript</button>
+            <button data-tab="tab-curl">HTTP</button>
+        </div>
+        <div class="tab-panel" id="tab-ios">
+<pre class="snippet"><span class="c">// Package: https://github.com/transifex/transifex-swift
+// In your App init / application(_:didFinishLaunchingWithOptions:)</span>
+import Transifex
+
+TXNativeBuilder()
+    .setLocales(TXLocaleState(sourceLocale: "{{ project.source_language_code }}",
+                              appLocales: {{ app_locales|tojson }}))
+    .setToken("{{ project.token }}")
+    .setCDSHost("{{ cds_host }}")
+    .build()
+
+TXNative.fetchTranslations()</pre>
+        </div>
+        <div class="tab-panel" id="tab-cli" hidden>
+<pre class="snippet"><span class="c"># Push source strings (reads .xcstrings, .strings, .stringsdict, XLIFF)</span>
+export FLINTSTONE_CDS_HOST={{ cds_host }}
+export FLINTSTONE_TOKEN={{ project.token }}
+export FLINTSTONE_SECRET=&lt;secret&gt;
+flintstone push --project MyApp.xcodeproj
+
+<span class="c"># First import of an app that is already localized</span>
+flintstone push --project MyApp.xcodeproj --with-translations
+
+<span class="c"># Bundle translations for offline use (txstrings.json), or
+# write them back into your String Catalogs</span>
+flintstone pull --output MyApp/
+flintstone pull --update-catalogs --project MyApp/</pre>
+        </div>
+        <div class="tab-panel" id="tab-js" hidden>
+<pre class="snippet"><span class="c">// npm install @transifex/native</span>
+import { tx, t } from '@transifex/native';
+
+tx.init({
+  token: '{{ project.token }}',
+  cdsHost: '{{ cds_host }}',
+});
+await tx.setCurrentLocale('{{ app_locales[1] if app_locales|length > 1 else app_locales[0] }}');
+t('Hello', { _key: 'greeting' });</pre>
+        </div>
+        <div class="tab-panel" id="tab-curl" hidden>
+<pre class="snippet">curl -H "Authorization: Bearer {{ project.token }}" \
+     {{ cds_host }}/languages
+
+curl -H "Authorization: Bearer {{ project.token }}" \
+     "{{ cds_host }}/content/{{ app_locales[1] if app_locales|length > 1 else app_locales[0] }}"</pre>
+        </div>
+    </section>
+
+    <!-- Activity -->
+    <section>
+        <div class="card">
+            <h3>Pushes</h3>
+            {% if jobs %}
+            <table class="compact">
+                <thead><tr><th>When</th><th>Content</th><th class="right">New</th><th class="right">Upd.</th><th class="right">Skip</th><th class="right">Del.</th><th></th></tr></thead>
+                <tbody>
+                {% for job in jobs %}
+                <tr title="{{ job.client }}{% if job.option_dict.get('dry_run') %} (dry run){% endif %}">
+                    <td class="nowrap">{{ job.created_at|ago }}</td>
+                    <td>{% if job.kind == 'source' %}source strings{% else %}<span class="badge lang">{{ job.language_code }}</span> translations{% endif %}
+                        {% if job.option_dict.get('dry_run') %}<span class="badge">dry run</span>{% endif %}
+                        {% if job.option_dict.get('purge') %}<span class="badge">purge</span>{% endif %}
+                        <div class="small muted">{{ job.client or "unknown client" }}</div></td>
+                    <td class="right">{{ job.created|num }}</td>
+                    <td class="right">{{ job.updated|num }}</td>
+                    <td class="right">{{ job.skipped|num }}</td>
+                    <td class="right">{{ job.deleted|num }}</td>
+                    <td>{% if job.failed %}<span class="badge" style="color:var(--fs-danger)" title="{{ job.error_list|map(attribute='detail')|join('; ') }}">{{ job.failed }} failed</span>{% else %}<span class="status reviewed"></span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="small muted">No pushes yet. Use <code>flintstone push</code>, <code>txios-cli push</code> or <code>txjs-cli push</code> with this project's CDS host and credentials.</p>
+            {% endif %}
+        </div>
+        <div class="card">
+            <h3>SDK activity</h3>
+            {% if activity %}
+            <table class="compact">
+                <tbody>
+                {% for a in activity %}
+                <tr>
+                    <td class="nowrap">{{ a.at|ago }}</td>
+                    <td>{{ a.action }}{% if a.language %} <span class="badge lang">{{ a.language }}</span>{% endif %}</td>
+                    <td class="small muted">{{ a.client or "unknown" }}</td>
+                    <td class="right small">{{ a.status }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="small muted">Requests from apps and CLIs to the CDS will show up here.</p>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<div class="split">
+    <section class="card">
+        <h3>Files</h3>
+        {% if files %}
+        <table class="compact">
+            <tbody>
+            {% for path, count in files %}
+            <tr>
+                <td class="mono"><a href="/projects/{{ project.id }}/translate?file={{ path|urlencode }}">{{ path }}</a></td>
+                <td class="right nowrap">{{ count|num }} strings</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="small muted">Occurrences reported by pushes appear here.</p>
+        {% endif %}
+    </section>
+    <section class="card">
+        <h3>Tags</h3>
+        {% if tags %}
+        {% for t in tags %}<a href="/projects/{{ project.id }}/translate?tag={{ t.tag|urlencode }}" class="tag">{{ t.tag }} <span class="muted">{{ t.count }}</span></a>{% endfor %}
+        {% else %}
+        <p class="small muted">No tags yet. Add them with <code>--append-tags</code> when pushing, or on strings you add below.</p>
+        {% endif %}
+    </section>
+</div>
+
+<details class="card">
+    <summary><strong>Add a string manually</strong></summary>
+    <form id="add-key-form" onsubmit="return addKey(event)">
+        <div class="grid">
+            <label>Key <input type="text" name="key" required placeholder="settings.title"></label>
+            <label>Developer comment <input type="text" name="description" placeholder="Shown to translators"></label>
+        </div>
+        <div class="grid">
+            <label>Tags <input type="text" name="tags" placeholder="ui, onboarding"></label>
+            <label>Character limit <input type="number" name="character_limit" min="1" placeholder="None"></label>
+        </div>
+        <button type="submit" class="btn-sm">Add string</button>
+    </form>
+</details>
+{% endblock %}
+
+{% block extra_scripts %}
 <script>
+const PROJECT_ID = {{ project.id }};
+
+async function addLanguage(e) {
+    e.preventDefault();
+    const res = await fetch(`/api/projects/${PROJECT_ID}/languages`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ code: e.target.code.value })
+    });
+    if (res.ok) location.reload(); else alert((await res.json()).detail || 'Error');
+    return false;
+}
+
+async function removeLanguage(code) {
+    if (!confirm(`Stop translating into ${code}? Existing translations are kept.`)) return;
+    const res = await fetch(`/api/projects/${PROJECT_ID}/languages/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    if (res.ok) location.reload(); else alert((await res.json()).detail || 'Error');
+}
+
+async function rotateSecret() {
+    if (!confirm('Generate a new secret? The current one stops working immediately.')) return;
+    const res = await fetch(`/api/projects/${PROJECT_ID}/credentials`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ rotate: 'secret' })
+    });
+    const body = await res.json();
+    if (!res.ok) { alert(body.detail || 'Error'); return; }
+    document.getElementById('secret-box').innerHTML = `
+        <div class="secret-once">
+            <p class="small" style="margin-bottom:0.4rem"><strong>New secret</strong> — copy it now, it will not be shown again.</p>
+            ${copyable(body.secret)}
+        </div>`;
+}
+
 async function addKey(e) {
     e.preventDefault();
     const form = e.target;
     const tags = form.tags.value ? form.tags.value.split(',').map(t => t.trim()).filter(Boolean) : [];
-    const data = { key: form.key.value, description: form.description.value, tags };
-    const res = await fetch('/api/projects/{{ project.id }}/keys', {
+    const data = {
+        key: form.key.value, description: form.description.value, tags,
+        character_limit: form.character_limit.value ? parseInt(form.character_limit.value, 10) : null,
+    };
+    const res = await fetch(`/api/projects/${PROJECT_ID}/keys`, {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
     if (res.ok) { form.reset(); location.reload(); }
-    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    else { const err = await res.json(); alert(typeof err.detail === 'string' ? err.detail : 'Error'); }
     return false;
 }
+
+document.querySelectorAll('.tabs button').forEach(btn => btn.addEventListener('click', () => {
+    btn.parentElement.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-panel').forEach(p => { p.hidden = p.id !== btn.dataset.tab; });
+}));
 </script>
 {% endblock %}

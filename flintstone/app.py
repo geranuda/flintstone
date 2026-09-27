@@ -5,9 +5,9 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-from .api import export, languages, memory, projects, tmx, translations
+from . import __version__
+from .api import cds, export, languages, memory, projects, tmx, translations
 from .database import init_db
 from .ui import views
 
@@ -22,16 +22,22 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Flintstone",
-    version="0.1.0",
-    description="Lightweight Translation Management System",
+    version=__version__,
+    description=(
+        "Lightweight Translation Management System with a Transifex Native compatible "
+        "Content Delivery Service under `/cds`."
+    ),
+    docs_url="/api/docs",
+    redoc_url="/redoc",
     lifespan=lifespan,
 )
 
+# Transifex Native CDS: CORS for browser SDKs, tolerant URL joining
+app.add_middleware(cds.CDSMiddleware)
+app.add_exception_handler(cds.CDSError, cds.cds_error_handler)
+
 # Static files
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
-
-# Templates
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # API routers
 app.include_router(projects.router)
@@ -40,6 +46,7 @@ app.include_router(translations.router)
 app.include_router(export.router)
 app.include_router(memory.router)
 app.include_router(tmx.router)
+app.include_router(cds.router)
 
 # UI router
 app.include_router(views.router)

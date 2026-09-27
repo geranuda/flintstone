@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from .. import editor, native
 from ..database import get_db
 from ..models import Language, Project, Translation, TranslationKey, TranslationMemory
 from ..schemas import (
@@ -17,6 +18,7 @@ from ..schemas import (
     LanguageStats,
     ProjectStats,
     TranslationResponse,
+    TranslationStatusUpdate,
     TranslationUpdate,
 )
 
@@ -46,6 +48,9 @@ def _key_to_response(tk: TranslationKey, db: Session) -> KeyResponse:
         id=tk.id, project_id=tk.project_id, key=tk.key,
         description=tk.description, created_at=tk.created_at,
         tags=_parse_tags(tk),
+        context=tk.context or "",
+        character_limit=tk.character_limit,
+        occurrences=tk.occurrence_list,
         translations=translations,
     )
 
@@ -83,8 +88,12 @@ def create_key(project_id: int, data: KeyCreate, db: Session = Depends(get_db)):
     ).first()
     if existing:
         raise HTTPException(400, f"Key '{data.key}' already exists in this project")
-    tags_str = ",".join(t.strip() for t in data.tags if t.strip())
-    tk = TranslationKey(project_id=project_id, key=data.key, description=data.description, tags=tags_str)
+    tags_str = ",".join(native.clean_list(data.tags, forbidden=","))
+    tk = TranslationKey(
+        project_id=project_id, key=data.key, description=data.description, tags=tags_str,
+        context=data.context, character_limit=data.character_limit,
+        occurrences="\n".join(native.clean_list(data.occurrences, forbidden="\n")),
+    )
     db.add(tk)
     db.commit()
     db.refresh(tk)
@@ -101,7 +110,13 @@ def update_key(key_id: int, data: KeyUpdate, db: Session = Depends(get_db)):
     if data.description is not None:
         tk.description = data.description
     if data.tags is not None:
-        tk.tags = ",".join(t.strip() for t in data.tags if t.strip())
+        tk.tags = ",".join(native.clean_list(data.tags, forbidden=","))
+    if data.context is not None:
+        tk.context = data.context
+    if data.character_limit is not None:
+        tk.character_limit = data.character_limit or None
+    if data.occurrences is not None:
+        tk.occurrences = "\n".join(native.clean_list(data.occurrences, forbidden="\n"))
     db.commit()
     db.refresh(tk)
     return _key_to_response(tk, db)
@@ -164,9 +179,15 @@ def set_translation(
     ).first()
 
     if translation:
+        if data.status:
+            translation.status = data.status
+        elif translation.value != data.value:
+            translation.status = "translated"  # an edit needs a fresh review
         translation.value = data.value
     else:
-        translation = Translation(key_id=key_id, language_id=language_id, value=data.value)
+        translation = Translation(
+            key_id=key_id, language_id=language_id, value=data.value, status=data.status or "translated",
+        )
         db.add(translation)
 
     # Auto-populate translation memory
@@ -197,6 +218,66 @@ def set_translation(
     db.commit()
     db.refresh(translation)
     return translation
+
+
+@router.put("/api/translations/{key_id}/{language_id}/status", response_model=TranslationResponse)
+def set_translation_status(
+    key_id: int, language_id: int, data: TranslationStatusUpdate, db: Session = Depends(get_db)
+):
+    """Mark a translation as translated, reviewed or proofread."""
+    translation = db.query(Translation).filter(
+        Translation.key_id == key_id,
+        Translation.language_id == language_id,
+    ).first()
+    if not translation:
+        raise HTTPException(404, "Translation not found")
+    translation.status = data.status
+    db.commit()
+    db.refresh(translation)
+    return translation
+
+
+@router.delete("/api/translations/{key_id}/{language_id}", status_code=204)
+def delete_translation(key_id: int, language_id: int, db: Session = Depends(get_db)):
+    translation = db.query(Translation).filter(
+        Translation.key_id == key_id,
+        Translation.language_id == language_id,
+    ).first()
+    if not translation:
+        raise HTTPException(404, "Translation not found")
+    db.delete(translation)
+    db.commit()
+
+
+@router.get("/api/projects/{project_id}/strings")
+def list_strings(
+    project_id: int,
+    lang: str = Query(..., description="Target language code"),
+    q: str = Query("", description="Search keys, source strings, translations and comments"),
+    tag: str = Query(""),
+    status: str = Query("", pattern="^(|untranslated|translated|unreviewed|reviewed)$"),
+    file: str = Query("", description="Only strings found in this file (occurrence)"),
+    sort: str = Query("key", pattern="^(key|source|recent)$"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Paginated strings for one target language, with Native metadata."""
+    project = _get_project_or_404(project_id, db)
+    target = native.find_project_language(db, project, lang)
+    if not target:
+        raise HTTPException(404, f"Language '{lang}' is not enabled for this project")
+    rows, total = editor.query_strings(
+        db, project, target, native.source_language(db, project),
+        q=q, tag=tag, status=status, file=file, sort=sort, page=page, per_page=per_page,
+    )
+    return {
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "language": target.code,
+        "strings": [editor.row_json(editor.row_view(r, target)) for r in rows],
+    }
 
 
 @router.post("/api/projects/{project_id}/translations/bulk")
@@ -307,25 +388,18 @@ def search_translations(
 @router.get("/api/projects/{project_id}/stats", response_model=ProjectStats)
 def get_project_stats(project_id: int, db: Session = Depends(get_db)):
     project = _get_project_or_404(project_id, db)
-    total_keys = db.query(TranslationKey).filter(
+    stats = native.language_stats(db, project)
+    total_keys = stats[0]["total"] if stats else db.query(TranslationKey).filter(
         TranslationKey.project_id == project_id
     ).count()
-    languages = db.query(Language).order_by(Language.code).all()
-
-    lang_stats = []
-    for lang in languages:
-        translated = db.query(Translation).join(TranslationKey).filter(
-            TranslationKey.project_id == project_id,
-            Translation.language_id == lang.id,
-        ).count()
-        percentage = (translated / total_keys * 100) if total_keys > 0 else 0.0
-        lang_stats.append(LanguageStats(
-            language_code=lang.code, language_name=lang.name,
-            translated=translated, total=total_keys,
-            percentage=round(percentage, 1),
-        ))
-
     return ProjectStats(
-        project_id=project.id, project_name=project.name,
-        total_keys=total_keys, languages=lang_stats,
+        project_id=project.id, project_name=project.name, total_keys=total_keys,
+        languages=[
+            LanguageStats(
+                language_code=s["language"].code, language_name=s["language"].name,
+                translated=s["translated"], total=s["total"], percentage=s["percentage"],
+                reviewed=s["reviewed"], is_source=s["is_source"],
+            )
+            for s in stats
+        ],
     )

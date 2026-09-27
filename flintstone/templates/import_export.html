@@ -1,14 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Import/Export - {{ project.name }} - Flintstone{% endblock %}
 {% block content %}
-<hgroup>
-    <h2>{{ project.name }} — Import / Export</h2>
-    <p><a href="/projects/{{ project.id }}">Back to project</a></p>
-</hgroup>
+<div class="crumbs"><a href="/">Projects</a> / <a href="/projects/{{ project.id }}">{{ project.name }}</a> / Import &amp; export</div>
+<div class="page-head">
+    <div>
+        <h1>Import &amp; export</h1>
+        <p>File-based workflows: JSON, CSV and TMX. For apps, prefer <code>flintstone push</code> / <code>pull</code>.</p>
+    </div>
+</div>
 
 <div class="grid">
     <!-- Export -->
-    <article>
+    <article class="card">
         <header><h3>Export</h3></header>
 
         <h4>JSON (per language)</h4>
@@ -33,7 +36,7 @@
     </article>
 
     <!-- Import -->
-    <article>
+    <article class="card">
         <header><h3>Import</h3></header>
 
         <h4>JSON file</h4>
@@ -68,7 +71,7 @@
                 Source Language
                 <select name="source_lang">
                     {% for lang in languages %}
-                    <option value="{{ lang.code }}" {% if lang.code == 'en' %}selected{% endif %}>{{ lang.code }} — {{ lang.name }}</option>
+                    <option value="{{ lang.code }}" {% if lang.code == project.source_language_code %}selected{% endif %}>{{ lang.code }} — {{ lang.name }}</option>
                     {% endfor %}
                 </select>
             </label>
@@ -87,7 +90,7 @@
 </div>
 
 <!-- Translation Memory -->
-<article>
+<article class="card">
     <header><h3>Translation Memory</h3></header>
     <p>Translation memory stores past translations and suggests them when editing. It is automatically populated as you translate.</p>
     <div class="grid">

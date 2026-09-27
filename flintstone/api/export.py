@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from .. import native
 from ..database import get_db
 from ..models import Language, Project, Translation, TranslationKey
 
@@ -56,7 +57,7 @@ def export_translations(
         )
 
     else:  # csv
-        languages = db.query(Language).order_by(Language.code).all()
+        languages = native.project_languages(db, project)
         output = io.StringIO()
         writer = csv.writer(output)
         header = ["key"] + [l.code for l in languages]

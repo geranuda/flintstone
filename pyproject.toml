@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flintstone"
-version = "0.1.0"
-description = "Lightweight translation management system"
+version = "0.2.0"
+description = "Lightweight translation management system with a Transifex Native compatible CDS"
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.108.0",
     "uvicorn[standard]>=0.24.0",
     "sqlalchemy>=2.0.0",
     "jinja2>=3.1.0",
@@ -22,4 +22,7 @@ dev = [
 ]
 
 [project.scripts]
-flintstone = "flintstone.__main__:main"
+flintstone = "flintstone.cli:main"
+
+[tool.setuptools.package-data]
+flintstone = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*"]

@@ -1,5 +1,10 @@
 """Test fixtures."""
 
+import os
+
+# Keep the app's own engine (used at startup) off the disk during tests.
+os.environ.setdefault("FLINTSTONE_DB", "sqlite://")
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -47,3 +52,23 @@ def client(db_session):
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+class NativeProject:
+    """A project created through the API, with CDS credentials and headers."""
+
+    def __init__(self, data: dict):
+        self.id = data["id"]
+        self.token = data["token"]
+        self.secret = data["secret"]
+        self.read = {"Authorization": f"Bearer {self.token}"}
+        self.write = {"Authorization": f"Bearer {self.token}:{self.secret}"}
+
+
+@pytest.fixture
+def native_project(client):
+    res = client.post("/api/projects", json={
+        "name": "App", "source_language": "en", "target_languages": ["es-MX", "fr"],
+    })
+    assert res.status_code == 201
+    return NativeProject(res.json())

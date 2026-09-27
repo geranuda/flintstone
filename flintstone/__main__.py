@@ -1,18 +1,8 @@
-"""Entry point for running Flintstone: python -m flintstone"""
+"""Entry point: ``python -m flintstone`` (runs the server) or ``python -m flintstone push ...``."""
 
-import uvicorn
+import sys
 
-from .config import settings
-
-
-def main():
-    uvicorn.run(
-        "flintstone.app:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
-    )
-
+from .cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

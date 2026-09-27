@@ -1,121 +1,143 @@
 {% extends "base.html" %}
-{% block title %}Dashboard - Flintstone{% endblock %}
+{% block title %}Projects - Flintstone{% endblock %}
 {% block content %}
-<hgroup>
-    <h2>Projects</h2>
-    <p>Manage your translation projects</p>
-</hgroup>
+<div class="page-head">
+    <div>
+        <h1>Projects</h1>
+        <p>Each project is a Transifex Native compatible resource: push strings with the CLI, translate here, deliver over the air from <code>/cds</code>.</p>
+    </div>
+    <a href="#new-project" role="button" class="btn-sm" onclick="document.getElementById('new-project').open = true">New project</a>
+</div>
 
-<!-- Create Project Form -->
-<details>
-    <summary role="button" class="outline">New Project</summary>
+<details id="new-project" class="card" {% if not projects %}open{% endif %}>
+    <summary><strong>New project</strong></summary>
     <form id="create-project-form" onsubmit="return createProject(event)">
         <div class="grid">
-            <label>
-                Name
-                <input type="text" name="name" required placeholder="my-app">
+            <label>Name
+                <input type="text" name="name" required placeholder="MyApp">
             </label>
-            <label>
-                Description
-                <input type="text" name="description" placeholder="Optional description">
+            <label>Description
+                <input type="text" name="description" placeholder="Optional">
             </label>
         </div>
-        <button type="submit">Create Project</button>
+        <div class="grid">
+            <label>Source language
+                <select name="source_language">
+                    {% for info in catalog %}
+                    <option value="{{ info.code }}" {% if info.code == 'en' %}selected{% endif %}>{{ info.name }} — {{ info.code }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>Target languages
+                <input type="text" name="target_languages" list="language-codes" placeholder="es-MX, fr, de" required>
+                <small>Comma-separated codes, e.g. <code>es-MX</code>, <code>pt-BR</code>, <code>zh-Hans</code>.</small>
+            </label>
+        </div>
+        <datalist id="language-codes">
+            {% for info in catalog %}<option value="{{ info.code }}">{{ info.name }}</option>{% endfor %}
+        </datalist>
+        <button type="submit" class="btn-sm">Create project</button>
     </form>
+    <div id="new-credentials"></div>
 </details>
 
-<!-- Add Language Form -->
-<details>
-    <summary role="button" class="outline secondary">Add Language</summary>
+{% if projects %}
+<div class="card-grid">
+    {% for item in projects %}
+    {% set p = item.project %}
+    <article class="card project-card">
+        <div class="row spread">
+            <h3><a href="/projects/{{ p.id }}">{{ p.name }}</a></h3>
+            <span class="badge source lang" title="Source language">{{ p.source_language_code }}</span>
+        </div>
+        {% if p.description %}<p class="small muted" style="margin:0">{{ p.description }}</p>{% endif %}
+        <div class="row small muted" style="margin-top:0.5rem">
+            <span><strong style="color:#1f2933">{{ item.key_count|num }}</strong> strings</span>
+            <span>·</span>
+            <span>{{ item.targets|length }} target language{{ '' if item.targets|length == 1 else 's' }}</span>
+            {% if item.last_job %}<span>·</span><span>pushed {{ item.last_job.created_at|ago }}</span>{% endif %}
+        </div>
+        <div class="langs">
+            {% for s in item.targets %}
+            <div class="lang-line" title="{{ s.language.name }}: {{ s.translated|num }} translated, {{ s.reviewed|num }} reviewed">
+                <span class="badge lang">{{ s.language.code }}</span>
+                <div class="progress">
+                    <span class="translated" style="width: {{ s.percentage }}%"></span>
+                    <span class="reviewed" style="width: {{ s.reviewed_percentage }}%"></span>
+                </div>
+                <span class="pct">{{ s.percentage|round(0)|int }}%</span>
+            </div>
+            {% else %}
+            <p class="small muted">No target languages yet.</p>
+            {% endfor %}
+        </div>
+        <div class="actions">
+            <a href="/projects/{{ p.id }}/translate" role="button" class="btn-sm">Translate</a>
+            <a href="/projects/{{ p.id }}" role="button" class="btn-sm outline secondary">Overview</a>
+            <button class="btn-sm outline secondary" style="margin-left:auto" onclick="deleteProject({{ p.id }}, {{ p.name|tojson|forceescape }})">Delete</button>
+        </div>
+    </article>
+    {% endfor %}
+</div>
+{% endif %}
+
+<details class="card">
+    <summary><strong>Languages</strong> <span class="muted small">— {{ languages|length }} in this server</span></summary>
+    <p class="small muted">Languages are created automatically when you add them to a project. Projects created without an explicit language list translate into all of these.</p>
+    <p>{% for lang in languages %}<span class="badge lang" title="{{ lang.name }}">{{ lang.code }}</span> {% endfor %}</p>
     <form id="create-language-form" onsubmit="return createLanguage(event)">
         <div class="grid">
-            <label>
-                Code
-                <input type="text" name="code" required placeholder="en" maxlength="10">
-            </label>
-            <label>
-                Name
-                <input type="text" name="name" required placeholder="English">
-            </label>
+            <input type="text" name="code" required placeholder="Code, e.g. fr" maxlength="10">
+            <input type="text" name="name" required placeholder="Name, e.g. French">
+            <button type="submit" class="btn-sm secondary">Add language</button>
         </div>
-        <button type="submit" class="secondary">Add Language</button>
     </form>
 </details>
+{% endblock %}
 
-{% if languages %}
-<p><small>Languages: {% for lang in languages %}<span class="badge">{{ lang.code }}</span> {% endfor %}</small></p>
-{% endif %}
-
-<!-- Project List -->
-{% if projects %}
-<table>
-    <thead>
-        <tr>
-            <th>Project</th>
-            <th>Keys</th>
-            {% for lang in languages %}
-            <th>{{ lang.code }}</th>
-            {% endfor %}
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for item in projects %}
-        <tr>
-            <td>
-                <a href="/projects/{{ item.project.id }}"><strong>{{ item.project.name }}</strong></a>
-                {% if item.project.description %}<br><small>{{ item.project.description }}</small>{% endif %}
-            </td>
-            <td>{{ item.key_count }}</td>
-            {% for lang in languages %}
-            <td>
-                <div class="progress-bar">
-                    <div class="progress-bar-fill" style="width: {{ item.completion.get(lang.code, 0) }}%"></div>
-                </div>
-                <small>{{ item.completion.get(lang.code, 0) }}%</small>
-            </td>
-            {% endfor %}
-            <td>
-                <div class="actions">
-                    <a href="/projects/{{ item.project.id }}/translate" role="button" class="btn-sm outline">Translate</a>
-                    <button class="btn-sm outline secondary" onclick="deleteProject({{ item.project.id }})">Delete</button>
-                </div>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No projects yet. Create one above to get started.</p>
-{% endif %}
-
+{% block extra_scripts %}
 <script>
 async function createProject(e) {
     e.preventDefault();
     const form = e.target;
-    const data = { name: form.name.value, description: form.description.value };
+    const targets = form.target_languages.value.split(',').map(s => s.trim()).filter(Boolean);
+    const data = {
+        name: form.name.value, description: form.description.value,
+        source_language: form.source_language.value, target_languages: targets,
+    };
     const res = await fetch('/api/projects', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
     });
-    if (res.ok) { location.reload(); }
-    else { const err = await res.json(); alert(err.detail || 'Error'); }
+    const body = await res.json();
+    if (!res.ok) { alert(body.detail ? JSON.stringify(body.detail) : 'Error'); return false; }
+    form.hidden = true;
+    const box = document.getElementById('new-credentials');
+    box.innerHTML = `
+        <div class="secret-once">
+            <p><strong>${escapeHtml(body.name)}</strong> is ready. Save the secret now — Flintstone stores only its hash.</p>
+            <dl class="kv">
+                <dt>Token</dt><dd>${copyable(body.token)}</dd>
+                <dt>Secret</dt><dd>${copyable(body.secret)}</dd>
+            </dl>
+            <p style="margin:0.75rem 0 0"><a href="/projects/${body.id}" role="button" class="btn-sm">Open project</a></p>
+        </div>`;
     return false;
 }
 
 async function createLanguage(e) {
     e.preventDefault();
     const form = e.target;
-    const data = { code: form.code.value, name: form.name.value };
     const res = await fetch('/api/languages', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ code: form.code.value, name: form.name.value })
     });
     if (res.ok) { location.reload(); }
     else { const err = await res.json(); alert(err.detail || 'Error'); }
     return false;
 }
 
-async function deleteProject(id) {
-    if (!confirm('Delete this project and all its translations?')) return;
+async function deleteProject(id, name) {
+    if (!confirm(`Delete "${name}" and all its strings and translations?`)) return;
     await fetch(`/api/projects/${id}`, { method: 'DELETE' });
     location.reload();
 }
