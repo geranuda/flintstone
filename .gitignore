@@ -20,3 +20,7 @@ env/
 .mypy_cache/
 htmlcov/
 .coverage
+
+# Local server started by scripts/quickstart.sh
+flintstone.log
+.flintstone.pid

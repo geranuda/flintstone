@@ -65,6 +65,14 @@ Flintstone stores strings the way Transifex's iOS tooling sends them, so the iOS
 
 This walkthrough uses [Spoon](https://github.com/geranuda/spoon), an iPhone + Apple Watch + Live Activity app that already ships English and Spanish (Mexico) through String Catalogs.
 
+**Fastest way (macOS or Linux, needs git and Python 3.10+):** one command downloads Flintstone into `~/flintstone`, installs it, starts it, finds `Spoon.xcodeproj` on your disk, creates the Spoon project (English → Spanish (Mexico)), pushes everything and opens it in your browser:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/geranuda/flintstone/refs/heads/claude/sweet-davinci-xem524/scripts/quickstart.sh | bash
+```
+
+If it can't find the app, pass the path: `… | bash -s -- ~/code/spoon/Spoon.xcodeproj`. Running it again reuses everything. `APP_NAME`, `TARGETS` and `FLINTSTONE_PORT` change the defaults. The steps below do the same thing by hand.
+
 **1. Run Flintstone and create a project**
 
 ```bash
@@ -352,6 +360,7 @@ flintstone/
     ├── editor.js            # Autosave, plural forms, review, TM suggestions
     └── vendor/pico.min.css  # Pico CSS 2.1.1 (MIT)
 scripts/
+├── quickstart.sh            # One command: install, run, create the project, push an app, open it
 └── demo_push.sh             # Create a project and push an app into it
 ```
 
